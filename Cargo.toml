@@ -16,7 +16,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/xporthofs/xporthofs"
+repository = "https://github.com/emergencybutter/ButterSat"
 rust-version = "1.80"
 
 [workspace.dependencies]
