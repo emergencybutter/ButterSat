@@ -86,7 +86,13 @@ impl Prefetcher {
     }
 
     fn push_mesh(&self, t: DsfTile) -> bool {
-        if self.mesh.lock().is_none() || !self.seen_mesh.lock().insert(t) {
+        // Only tiles the catalog presents and that aren't on disk yet;
+        // uncovered tiles (ocean, outside coverage) are never queued.
+        let wanted = match self.mesh.lock().as_ref() {
+            Some(m) => m.is_listed(t) && !m.is_dsf_ready(t),
+            None => false,
+        };
+        if !wanted || !self.seen_mesh.lock().insert(t) {
             return false;
         }
         self.queued.fetch_add(1, Ordering::Relaxed);
