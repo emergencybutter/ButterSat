@@ -61,7 +61,9 @@ async fn session(
     atx: &watch::Sender<Option<AircraftState>>,
     ctx: &watch::Sender<bool>,
 ) -> anyhow::Result<()> {
-    let http = reqwest::Client::builder().timeout(Duration::from_secs(5)).build()?;
+    // A handful of lookups per session: no pooling, so servers that close
+    // connections after each response work too.
+    let http = reqwest::Client::builder().timeout(Duration::from_secs(5)).pool_max_idle_per_host(0).build()?;
     let ids = resolve_ids(&http, port).await?;
     let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}/api/v2")).await?;
     let sub = json!({
