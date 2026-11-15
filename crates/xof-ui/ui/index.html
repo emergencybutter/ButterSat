@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xporthofs</title>
+  <link rel="stylesheet" href="vendor/maplibre-gl-5.24.0/maplibre-gl.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="icon.png" alt=""><span>xporthofs</span></div>
+    <div class="pills">
+      <span class="pill" id="pill-daemon" title="Background daemon">daemon</span>
+      <span class="pill" id="pill-mount" title="Scenery mount">mount</span>
+      <span class="pill" id="pill-sim" title="X-Plane 12 Web API">X-Plane</span>
+    </div>
+    <button id="btn-mount" class="primary">Mount</button>
+  </header>
+
+  <nav class="side">
+    <a href="#overview" class="active">Overview</a>
+    <a href="#map">Map</a>
+    <a href="#prepare">Prepare flight</a>
+    <a href="#packs">Packs</a>
+    <a href="#settings">Settings</a>
+    <a href="#logs">Logs</a>
+    <a href="#about">About</a>
+  </nav>
+
+  <main>
+    <section id="overview" class="view active">
+      <div id="banner" class="banner hidden"></div>
+      <div class="grid">
+        <div class="card">
+          <h3>Scenery</h3>
+          <dl>
+            <dt>Mount</dt><dd id="o-mounted">—</dd>
+            <dt>Location</dt><dd id="o-mountpoint" class="mono">—</dd>
+            <dt>X-Plane</dt><dd id="o-xplane" class="mono">—</dd>
+          </dl>
+        </div>
+        <div class="card">
+          <h3>Flight</h3>
+          <dl>
+            <dt>Simulator</dt><dd id="o-sim">—</dd>
+            <dt>Position</dt><dd id="o-pos" class="mono">—</dd>
+            <dt>Speed / height</dt><dd id="o-spd">—</dd>
+            <dt>Dynamic zoom</dt><dd id="o-dz">—</dd>
+          </dl>
+        </div>
+        <div class="card">
+          <h3>Imagery</h3>
+          <dl>
+            <dt>Provider</dt><dd id="o-provider">—</dd>
+            <dt>Texture reads</dt><dd id="o-reads">—</dd>
+            <dt>Tiles fetched</dt><dd id="o-fetched">—</dd>
+            <dt>Degraded / upgraded</dt><dd id="o-degraded">—</dd>
+          </dl>
+          <div class="hist" id="o-hist" title="Read latency"></div>
+          <div class="hist-labels"><span>&lt;10ms</span><span>&lt;50</span><span>&lt;200</span><span>&lt;1s</span><span>&lt;3s</span><span>≥3s</span></div>
+        </div>
+        <div class="card">
+          <h3>Mesh</h3>
+          <dl>
+            <dt>Catalog</dt><dd id="o-catalog">—</dd>
+            <dt>Tiles</dt><dd id="o-tiles">—</dd>
+            <dt>Downloads</dt><dd id="o-downloads">—</dd>
+            <dt>Prefetch queue</dt><dd id="o-queue">—</dd>
+          </dl>
+        </div>
+      </div>
+      <div class="card wide">
+        <h3>Health</h3>
+        <ul id="health" class="health"></ul>
+      </div>
+    </section>
+
+    <section id="map" class="view">
+      <div id="mapview"></div>
+      <div class="legend">
+        <div><i class="sw cat"></i>Mesh available</div>
+        <div><i class="sw ready"></i>Mesh downloaded</div>
+        <div><i class="sw cache"></i>Imagery cached</div>
+        <div><i class="sw pf"></i>Prefetch area</div>
+      </div>
+    </section>
+
+    <section id="prepare" class="view">
+      <div class="card">
+        <h3>Prepare departure</h3>
+        <p class="muted">Fetch the meshes and imagery around an airport before starting X-Plane, so the first load is quick.</p>
+        <form id="f-prepare" class="row">
+          <input id="icao" placeholder="ICAO, e.g. KJFK" maxlength="8" autocomplete="off" required>
+          <button class="primary">Prepare</button>
+        </form>
+        <p id="prepare-result" class="result"></p>
+      </div>
+      <div class="card">
+        <h3>SimBrief route</h3>
+        <p class="muted">Prefetch meshes and low-resolution imagery along your latest SimBrief flight plan.</p>
+        <form id="f-route" class="row">
+          <input id="sb-user" placeholder="SimBrief username or pilot ID" autocomplete="off">
+          <button class="primary">Prefetch route</button>
+        </form>
+        <p id="route-result" class="result"></p>
+      </div>
+    </section>
+
+    <section id="packs" class="view">
+      <div class="card">
+        <h3>Imported packs</h3>
+        <p class="muted">Optional: Ortho4XP or AutoOrtho packs you built yourself. They take priority over streamed meshes for the tiles they cover.</p>
+        <ul id="packs-list" class="list"></ul>
+        <button id="btn-import">Import a pack folder…</button>
+        <p id="import-result" class="result"></p>
+      </div>
+      <div class="card">
+        <h3>Cache</h3>
+        <dl>
+          <dt>Imagery</dt><dd id="c-imagery">—</dd>
+          <dt>Meshes</dt><dd id="c-mesh">—</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section id="settings" class="view">
+      <form id="f-settings" class="card settings">
+        <h3>Imagery</h3>
+        <label>Provider
+          <select name="imagery.provider"><option value="esri">Esri World Imagery</option><option value="bing">Bing Maps Aerial</option></select>
+        </label>
+        <label class="check"><input type="checkbox" name="imagery.provider_notice_accepted">
+          I have read the provider's terms of use and use the imagery for personal flight simulation only.</label>
+        <label>Read time budget (ms)<input type="number" name="imagery.deadline_ms" min="200" max="10000" step="100"></label>
+        <label>Imagery cache size (GB)<input type="number" name="imagery.cache_size_gb" min="5" max="2000"></label>
+        <label>Texture RAM (MB)<input type="number" name="imagery.segment_ram_mb" min="128" max="16384" step="128"></label>
+
+        <h3>Prefetch</h3>
+        <label class="check"><input type="checkbox" name="prefetch.enabled"> Prefetch ahead of the aircraft</label>
+        <label>Look-ahead (minutes)<input type="number" name="prefetch.lookahead_minutes" min="1" max="30" step="0.5"></label>
+        <label class="check"><input type="checkbox" name="prefetch.dynamic_zoom"> Dynamic zoom: lower resolution at cruise</label>
+        <label>Dynamic zoom above (ft AGL)<input type="number" name="prefetch.dynamic_zoom_agl_ft" min="1000" max="45000" step="500"></label>
+        <label>SimBrief user<input name="simbrief.user" placeholder="optional"></label>
+
+        <h3>Meshes</h3>
+        <label class="check"><input type="checkbox" name="mesh.enabled"> Stream meshes from the catalog</label>
+        <label>Mesh cache size (GB)<input type="number" name="mesh.cache_size_gb" min="1" max="2000"></label>
+        <label>Catalog mirrors (one per line)<textarea name="mesh.mirrors" rows="2"></textarea></label>
+        <label>Trusted catalog keys (one per line)<textarea name="mesh.public_keys" rows="2" class="mono"></textarea></label>
+
+        <h3>X-Plane and mount</h3>
+        <label>X-Plane 12 folder<input name="xplane.path" placeholder="auto-detected"></label>
+        <label>Mount point<input name="mount.path" placeholder="&lt;X-Plane&gt;/Custom Scenery/z_xporthofs"></label>
+        <label class="check"><input type="checkbox" name="mount.auto_mount"> Mount when the daemon starts</label>
+        <label class="check"><input type="checkbox" name="mount.manage_scenery_packs"> Keep the scenery_packs.ini entry up to date</label>
+
+        <div class="row end"><span id="settings-result" class="result"></span><button class="primary">Save</button></div>
+      </form>
+    </section>
+
+    <section id="logs" class="view">
+      <div class="card wide"><h3>Daemon log</h3><pre id="log" class="log"></pre></div>
+    </section>
+
+    <section id="about" class="view">
+      <div class="card">
+        <h3>xporthofs <span id="about-version"></span></h3>
+        <p>Streamed orthophoto scenery for X-Plane 12. Open source under the MIT licence.</p>
+        <ul id="notices" class="list small"></ul>
+      </div>
+    </section>
+  </main>
+
+  <script src="vendor/maplibre-gl-5.24.0/maplibre-gl.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

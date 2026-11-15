@@ -417,6 +417,21 @@ impl App {
                 blocking(Box::new(move || Ok(json!(this.store.evict_area(a.provider_byte, a.area)?)))).await
             }
             method::CATALOG_STATUS => Ok(json!(self.stack.lock().mesh.as_ref().map(|m| m.status()))),
+            method::CATALOG_TILES => {
+                let mesh = self.stack.lock().mesh.clone();
+                let this_tiles = tokio::task::spawn_blocking(move || {
+                    mesh.map(|m| {
+                        m.listed_tiles()
+                            .into_iter()
+                            .map(|t| xof_proto::CatalogTile { tile: t.name(), lat: t.lat, lon: t.lon, ready: m.is_dsf_ready(t) })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+                })
+                .await
+                .map_err(|e| (-32000, e.to_string()))?;
+                Ok(json!(this_tiles))
+            }
             method::CATALOG_REFRESH => {
                 self.clone().refresh_catalog().await;
                 Ok(json!(self.stack.lock().mesh.as_ref().map(|m| m.status())))

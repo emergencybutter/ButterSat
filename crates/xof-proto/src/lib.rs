@@ -35,6 +35,7 @@ pub mod method {
     pub const CACHE_EVICT_AREA: &str = "cache_evict_area";
     pub const CATALOG_STATUS: &str = "catalog_status";
     pub const CATALOG_REFRESH: &str = "catalog_refresh";
+    pub const CATALOG_TILES: &str = "catalog_tiles";
     pub const PREPARE_DEPARTURE: &str = "prepare_departure";
     pub const PREFETCH_ROUTE: &str = "prefetch_route";
     pub const PACKS_LIST: &str = "packs_list";
@@ -215,6 +216,15 @@ pub struct PrepareResult {
     pub name: Option<String>,
     pub mesh_tiles: usize,
     pub imagery_tiles: usize,
+}
+
+/// One catalog tile for the UI map.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CatalogTile {
+    pub tile: String,
+    pub lat: i32,
+    pub lon: i32,
+    pub ready: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
