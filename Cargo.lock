@@ -6508,6 +6508,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "xof-bench"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "image",
+ "parking_lot",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml 0.8.2",
+ "xof-proto",
+]
+
+[[package]]
 name = "xof-cli"
 version = "0.1.0"
 dependencies = [

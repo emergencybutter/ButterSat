@@ -8,6 +8,7 @@ members = [
     "crates/xof-daemon",
     "crates/xof-cli",
     "crates/xof-publish",
+    "crates/xof-bench",
     "crates/xof-ui",
 ]
 

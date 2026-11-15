@@ -3,6 +3,7 @@
 //! shared configuration and status types.
 
 pub mod config;
+pub mod xplane;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

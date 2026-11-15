@@ -24,6 +24,7 @@ Nothing to pre-download: install, launch, fly. Design: [`docs/design.md`](docs/d
 | `xof-cli` | command-line control; `xof-cli run` for a standalone test mount |
 | `xof-publish` | build, sign and upload the mesh catalog |
 | `xof-ui` | Tauri control app (`xporthofs`) |
+| `xof-bench` | automated in-sim A/B benchmark: drives X-Plane, slews between spots, scores nadir screenshots ([`docs/bench.md`](docs/bench.md)) |
 
 ## Requirements
 
