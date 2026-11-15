@@ -52,6 +52,7 @@ hex = "0.4"
 rand = "0.8"
 interprocess = { version = "2", features = ["tokio"] }
 tempfile = "3"
+fs4 = "1"
 proptest = "1"
 
 [profile.release]

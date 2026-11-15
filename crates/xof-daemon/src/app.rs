@@ -223,6 +223,7 @@ impl App {
             engine: stack.engine.stats(),
             mesh: stack.mesh.as_ref().map(|m| m.status()),
             prefetch: self.prefetch.status(),
+            storage: Default::default(),
         }
     }
 
@@ -332,7 +333,12 @@ impl App {
                     "No trusted catalog signing key configured: streamed meshes are disabled".into(),
                     Some("Add the catalog's public key under [mesh].public_keys in config.toml."),
                 );
-            } else if let Some(m) = &self.stack.lock().mesh {
+            } else if let Some(m) = {
+                // Release the stack lock before doing work (no guard in the
+                // if-let scrutinee).
+                let mesh = self.stack.lock().mesh.clone();
+                mesh
+            } {
                 let s = m.status();
                 if s.online {
                     add(
@@ -465,7 +471,8 @@ impl App {
                             tracing::info!("imagery cache: evicted {} MB", freed >> 20);
                         }
                     }
-                    if let Some(m) = this.stack.lock().mesh.clone() {
+                    let mesh = this.stack.lock().mesh.clone();
+                    if let Some(m) = mesh {
                         let freed = m.evict_to(cfg.mesh.cache_size_gb << 30);
                         if freed > 0 {
                             tracing::info!("mesh cache: evicted {} MB", freed >> 20);
@@ -476,7 +483,8 @@ impl App {
             .await;
             // Apply catalog updates only while X-Plane isn't running.
             if !*self.web.connected.borrow() {
-                if let Some(m) = self.stack.lock().mesh.clone() {
+                let mesh = self.stack.lock().mesh.clone();
+                if let Some(m) = mesh {
                     if m.promote_pending() {
                         tracing::info!("applied mesh catalog update");
                     }
@@ -557,11 +565,13 @@ impl App {
                 *self.cfg.lock() = new;
                 if sim_running && self.is_mounted() {
                     // Don't pull the scenery from under a running simulator.
-                    self.prefetch.reconfigure(
-                        self.config().prefetch,
-                        self.stack.lock().engine.clone(),
-                        self.stack.lock().mesh.clone(),
-                    );
+                    // (One lock: guards in a single expression live until its
+                    // end, and parking_lot mutexes aren't re-entrant.)
+                    let (engine, mesh) = {
+                        let st = self.stack.lock();
+                        (st.engine.clone(), st.mesh.clone())
+                    };
+                    self.prefetch.reconfigure(self.config().prefetch, engine, mesh);
                     return Ok(
                         json!({ "applied": false, "note": "Saved. Imagery/mesh changes apply after X-Plane exits." }),
                     );

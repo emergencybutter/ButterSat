@@ -23,4 +23,5 @@ dirs.workspace = true
 futures.workspace = true
 ed25519-dalek.workspace = true
 interprocess.workspace = true
+fs4.workspace = true
 tokio-tungstenite = "0.26"

@@ -25,6 +25,7 @@ pub struct DaemonConfig {
     pub packs: PacksConfig,
     pub simbrief: SimbriefConfig,
     pub startup: StartupConfig,
+    pub storage: StorageConfig,
 }
 
 impl Default for DaemonConfig {
@@ -38,6 +39,7 @@ impl Default for DaemonConfig {
             packs: PacksConfig::default(),
             simbrief: SimbriefConfig::default(),
             startup: StartupConfig::default(),
+            storage: StorageConfig::default(),
         }
     }
 }
@@ -183,6 +185,15 @@ pub struct PacksConfig {
 pub struct SimbriefConfig {
     /// SimBrief username or pilot ID for route prefetch.
     pub user: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct StorageConfig {
+    /// Folder for the imagery and mesh caches (any drive); default: the
+    /// per-user cache folder. Change it with `storage_relocate`, which can
+    /// move the existing cache.
+    pub cache_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]

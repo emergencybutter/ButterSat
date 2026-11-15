@@ -2,12 +2,12 @@
 
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
-use parking_lot::Mutex;
+use parking_lot::{MappedRwLockReadGuard, Mutex, RwLock, RwLockReadGuard};
 use redb::{Database, Durability, ReadableTable, ReadableTableMetadata, TableDefinition};
 use serde::{Deserialize, Serialize};
 
@@ -73,27 +73,66 @@ pub struct AreaInfo {
 /// T1: raw imagery tiles keyed by provider and tile, grouped into areas for
 /// LRU eviction.
 pub struct TileStore {
-    db: Database,
+    /// `None` while closed (cache being moved): every operation fails, which
+    /// the engine treats as a cache miss.
+    db: RwLock<Option<Database>>,
+    path: Mutex<PathBuf>,
     /// Pending last-access updates, flushed in batches.
     touched: Mutex<HashMap<[u8; 10], u64>>,
 }
 
+fn create_db(path: &Path) -> anyhow::Result<Database> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let db = Database::create(path)?;
+    let tx = db.begin_write()?;
+    tx.open_table(TILES)?;
+    tx.open_table(AREAS)?;
+    tx.commit()?;
+    Ok(db)
+}
+
 impl TileStore {
     pub fn open(path: &Path) -> anyhow::Result<Arc<Self>> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let db = Database::create(path)?;
-        let tx = db.begin_write()?;
-        tx.open_table(TILES)?;
-        tx.open_table(AREAS)?;
-        tx.commit()?;
-        Ok(Arc::new(Self { db, touched: Mutex::new(HashMap::new()) }))
+        let db = create_db(path)?;
+        Ok(Arc::new(Self {
+            db: RwLock::new(Some(db)),
+            path: Mutex::new(path.to_path_buf()),
+            touched: Mutex::new(HashMap::new()),
+        }))
+    }
+
+    /// The database file.
+    pub fn path(&self) -> PathBuf {
+        self.path.lock().clone()
+    }
+
+    /// Flush and close the database (to move or delete its file). Waits for
+    /// in-flight operations.
+    pub fn close(&self) -> anyhow::Result<()> {
+        let _ = self.flush_access();
+        self.db.write().take();
+        Ok(())
+    }
+
+    /// Open (or create) the database at `path` and use it from now on.
+    pub fn reopen(&self, path: &Path) -> anyhow::Result<()> {
+        let mut g = self.db.write();
+        g.take();
+        *g = Some(create_db(path)?);
+        *self.path.lock() = path.to_path_buf();
+        Ok(())
+    }
+
+    fn db(&self) -> anyhow::Result<MappedRwLockReadGuard<'_, Database>> {
+        RwLockReadGuard::try_map(self.db.read(), |d| d.as_ref())
+            .map_err(|_| anyhow::anyhow!("imagery cache is closed (being moved)"))
     }
 
     pub fn get(&self, provider: &str, t: TileCoord) -> anyhow::Result<Option<Fetched>> {
         let p = provider_byte(provider);
-        let tx = self.db.begin_read()?;
+        let tx = self.db()?.begin_read()?;
         let table = tx.open_table(TILES)?;
         let Some(v) = table.get(&tile_key(p, t)[..])? else {
             return Ok(None);
@@ -126,7 +165,7 @@ impl TileStore {
                 val.extend_from_slice(&ts.to_be_bytes());
             }
         }
-        let mut tx = self.db.begin_write()?;
+        let mut tx = self.db()?.begin_write()?;
         tx.set_durability(Durability::Eventual);
         {
             let mut tiles = tx.open_table(TILES)?;
@@ -147,7 +186,7 @@ impl TileStore {
         if pending.is_empty() {
             return Ok(());
         }
-        let mut tx = self.db.begin_write()?;
+        let mut tx = self.db()?.begin_write()?;
         tx.set_durability(Durability::Eventual);
         {
             let mut areas = tx.open_table(AREAS)?;
@@ -163,7 +202,7 @@ impl TileStore {
     }
 
     pub fn total_bytes(&self) -> anyhow::Result<u64> {
-        let tx = self.db.begin_read()?;
+        let tx = self.db()?.begin_read()?;
         let areas = tx.open_table(AREAS)?;
         let mut sum = 0;
         for e in areas.iter()? {
@@ -173,7 +212,7 @@ impl TileStore {
     }
 
     pub fn areas(&self) -> anyhow::Result<Vec<AreaInfo>> {
-        let tx = self.db.begin_read()?;
+        let tx = self.db()?.begin_read()?;
         let areas = tx.open_table(AREAS)?;
         let mut out = Vec::new();
         for e in areas.iter()? {
@@ -197,7 +236,7 @@ impl TileStore {
     /// Delete one area (all providers' tiles under that area key).
     pub fn evict_area(&self, provider_byte: u8, area: TileCoord) -> anyhow::Result<u64> {
         let ak = area_key(provider_byte, area);
-        let mut tx = self.db.begin_write()?;
+        let mut tx = self.db()?.begin_write()?;
         tx.set_durability(Durability::Eventual);
         let freed;
         {
@@ -242,7 +281,7 @@ impl TileStore {
     }
 
     pub fn tile_count(&self) -> anyhow::Result<u64> {
-        let tx = self.db.begin_read()?;
+        let tx = self.db()?.begin_read()?;
         Ok(tx.open_table(TILES)?.len()?)
     }
 }

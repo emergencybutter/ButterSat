@@ -41,6 +41,10 @@ pub mod method {
     pub const PREFETCH_ROUTE: &str = "prefetch_route";
     pub const PACKS_LIST: &str = "packs_list";
     pub const PACKS_IMPORT: &str = "packs_import";
+    /// `{ path }` -> [`crate::StorageInfo`] for a candidate cache folder.
+    pub const STORAGE_INFO: &str = "storage_info";
+    /// `{ path, mode: "move" | "fresh" }`: change the cache folder (background job).
+    pub const STORAGE_RELOCATE: &str = "storage_relocate";
     pub const SUBSCRIBE: &str = "subscribe";
     /// Server → client notification.
     pub const EVENT: &str = "event";
@@ -185,6 +189,56 @@ pub struct Status {
     pub engine: EngineStatsSnapshot,
     pub mesh: Option<MeshStatus>,
     pub prefetch: PrefetchStatus,
+    #[serde(default)]
+    pub storage: StorageStatus,
+}
+
+/// Where the caches live and any relocation in progress.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct StorageStatus {
+    pub cache_path: String,
+    /// Free space on the cache drive.
+    pub available_bytes: u64,
+    pub total_bytes: u64,
+    pub job: Option<StorageJob>,
+    /// The configured folder couldn't be used at startup (drive missing?).
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct StorageJob {
+    pub to: String,
+    pub mode: String,
+    /// `running`, `done` or `failed`.
+    pub state: String,
+    pub done_bytes: u64,
+    pub total_bytes: u64,
+    pub message: String,
+}
+
+/// A candidate cache folder.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct StorageInfo {
+    pub path: String,
+    pub exists: bool,
+    pub writable: bool,
+    pub available_bytes: u64,
+    pub total_bytes: u64,
+    /// Size of the current cache (what "move" would copy).
+    pub current_cache_bytes: u64,
+    pub current_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StorageRelocate {
+    pub path: String,
+    /// `move` (default) or `fresh`.
+    #[serde(default = "default_move")]
+    pub mode: String,
+}
+
+fn default_move() -> String {
+    "move".into()
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
