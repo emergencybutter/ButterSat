@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ButterSat · Streamed photo scenery for X-Plane 12</title>
+  <meta name="description" content="ButterSat streams aerial imagery and matching terrain mesh into X-Plane 12 while you fly. No pre-built packs, no tile management.">
+  <link rel="icon" href="img/icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-row">
+      <a class="brand" href="#"><img src="img/icon.png" alt="" width="28" height="28">ButterSat</a>
+      <nav>
+        <a href="#how">How it works</a>
+        <a href="#details">Details</a>
+        <a href="#coverage">Coverage</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div class="hero-text">
+          <p class="tag">X-Plane 12 · Windows beta</p>
+          <h1>Real aerial imagery under every flight.</h1>
+          <p class="lead">ButterSat streams photo scenery and its terrain mesh into X-Plane while you fly. There are no packs to build, no tiles to download in advance and nothing to keep up to date.</p>
+          <p class="status">Private beta on Windows. Linux and macOS builds are on the way.</p>
+        </div>
+        <figure class="compare" id="compare">
+          <div class="cmp">
+            <img src="img/centralpark-default.jpg" alt="Central Park in X-Plane's default scenery: generic forest texture" width="1600" height="900">
+            <div class="after"><img src="img/centralpark-buttersat.jpg" alt="Central Park with ButterSat: real paths, ball fields and reservoir shoreline" width="1600" height="900"></div>
+            <span class="divider"></span>
+            <span class="label left">X-Plane default</span>
+            <span class="label right">ButterSat</span>
+            <input type="range" min="0" max="100" value="50" aria-label="Compare default scenery and ButterSat">
+          </div>
+          <figcaption>Central Park, New York, 2,500 ft. Same view, same moment. Drag to compare.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="how" class="band">
+      <div class="wrap">
+        <h2>How it works</h2>
+        <ol class="steps">
+          <li>
+            <span class="num">1</span>
+            <h3>Install</h3>
+            <p>One installer. It includes WinFsp, the file system driver ButterSat uses, and adds a scenery pack to X-Plane's Custom Scenery list.</p>
+          </li>
+          <li>
+            <span class="num">2</span>
+            <h3>Fly</h3>
+            <p>To X-Plane the pack looks like any other scenery folder. When X-Plane asks for a terrain file or a texture, ButterSat produces it on the spot.</p>
+          </li>
+          <li>
+            <span class="num">3</span>
+            <h3>It follows you</h3>
+            <p>ButterSat reads your position from X-Plane's web API and fetches the meshes and imagery ahead of the aircraft, so the next area is ready when you get there.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="details">
+      <div class="wrap">
+        <h2>What's different</h2>
+        <div class="grid">
+          <article>
+            <h3>Streamed, not pre-built</h3>
+            <p>Terrain meshes come from a signed catalog and are verified before use. Textures are assembled from imagery tiles band by band, compressed to the format X-Plane expects, and cached on disk.</p>
+          </article>
+          <article>
+            <h3>Made for X-Plane 12</h3>
+            <p>Meshes are completed on your machine with the water and seasonal layers from your own copy of X-Plane's Global Scenery. Nothing from Laminar Research is redistributed.</p>
+          </article>
+          <article>
+            <h3>No stutter in flight</h3>
+            <p>On a 186 km leg at 450 knots we measured the same number of frame hitches as with default scenery, and a higher frame rate: 72 fps against 61.</p>
+          </article>
+          <article>
+            <h3>Sharp from the first frame</h3>
+            <p>X-Plane reads each texture once when it loads an area. While its loading screen is up, ButterSat waits for full-resolution imagery rather than handing over a blurry placeholder that would stay for the whole flight.</p>
+          </article>
+          <article>
+            <h3>Your choice of imagery</h3>
+            <p>Free government aerial photography where it exists: USGS in the United States, IGN in France, swisstopo, PDOK in the Netherlands, PNOA in Spain and basemap.at in Austria. Esri or Bing worldwide if you accept their terms.</p>
+          </article>
+          <article>
+            <h3>Plan ahead</h3>
+            <p>Warm up the area around a departure airport, or along your latest SimBrief route, before you load the flight.</p>
+          </article>
+          <article>
+            <h3>Cache on any drive</h3>
+            <p>Put the cache on a large disk and set a size limit. You can move it later from the app; it copies across drives and checks free space first.</p>
+          </article>
+          <article>
+            <h3>Keeps your packs</h3>
+            <p>Already have Ortho4XP tiles? Import them and they are served alongside the streamed areas.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="wrap two">
+        <figure class="still">
+          <img src="img/suburbs-default.jpg" alt="Suburbs of Long Island in default scenery" loading="lazy" width="1600" height="900">
+          <figcaption>Hempstead, Long Island: X-Plane default</figcaption>
+        </figure>
+        <figure class="still">
+          <img src="img/suburbs-buttersat.jpg" alt="The same suburbs with ButterSat imagery" loading="lazy" width="1600" height="900">
+          <figcaption>Same place with ButterSat</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="coverage">
+      <div class="wrap two-col">
+        <div>
+          <h2>Coverage</h2>
+          <p>Imagery is available worldwide. Terrain meshes are built ahead of time with Ortho4XP from OpenStreetMap and public elevation data, then published to the catalog.</p>
+          <ul class="facts">
+            <li><strong>Available now</strong><span>New York area, 7 tiles</span></li>
+            <li><strong>Being built</strong><span>Continental United States</span></li>
+            <li><strong>Outside covered tiles</strong><span>X-Plane's own scenery, untouched</span></li>
+          </ul>
+        </div>
+        <div>
+          <h2>Requirements</h2>
+          <ul class="facts">
+            <li><strong>Simulator</strong><span>X-Plane 12</span></li>
+            <li><strong>Windows 10 / 11</strong><span>Beta</span></li>
+            <li><strong>Linux</strong><span>In progress (FUSE)</span></li>
+            <li><strong>macOS</strong><span>In progress (macFUSE)</span></li>
+            <li><strong>Connection</strong><span>Needed for new areas; cached areas work offline</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq" class="band">
+      <div class="wrap"><div class="faq">
+        <h2>Questions</h2>
+        <details>
+          <summary>Do I still need Ortho4XP?</summary>
+          <p>No. ButterSat's meshes are built with Ortho4XP on our side and streamed to you. If you already have Ortho4XP packs, you can keep using them.</p>
+        </details>
+        <details>
+          <summary>How much disk space does it use?</summary>
+          <p>As much as you allow. Imagery and meshes are cached up to the limits you set, on the drive you choose, and the oldest areas are removed first.</p>
+        </details>
+        <details>
+          <summary>How long does a new area take to load?</summary>
+          <p>The first time you start a flight somewhere new, expect around a minute and a half while the imagery is fetched. Areas you have flown before load from the cache. Once you are flying, new areas stream in the background.</p>
+        </details>
+        <details>
+          <summary>Does it change my X-Plane installation?</summary>
+          <p>It adds one entry to scenery_packs.ini, with a backup, and removes it again when uninstalled. Everything else lives in ButterSat's own folders.</p>
+        </details>
+        <details>
+          <summary>Which imagery should I pick?</summary>
+          <p>Open government imagery is free to use but varies by country; in the United States it is noticeably softer than Esri's. Esri and Bing are sharper and cover the whole world, under their providers' terms. You can switch at any time.</p>
+        </details>
+      </div></div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap foot">
+      <p><strong>ButterSat</strong> is open source under the MIT licence.</p>
+      <p>Mesh data © OpenStreetMap contributors, ODbL. Elevation: USGS 3DEP. Screenshot imagery: Esri, Maxar, Earthstar Geographics, and the GIS User Community.</p>
+      <p>X-Plane is a trademark of Laminar Research. ButterSat is an independent project and is not affiliated with Laminar Research.</p>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var fig = document.getElementById("compare");
+      if (!fig) return;
+      var range = fig.querySelector("input");
+      var set = function () { fig.style.setProperty("--pos", range.value + "%"); };
+      range.addEventListener("input", set);
+      set();
+    })();
+  </script>
+</body>
+</html>
