@@ -43,6 +43,8 @@ pub mod method {
     pub const PACKS_IMPORT: &str = "packs_import";
     /// `{ path }` -> [`crate::StorageInfo`] for a candidate cache folder.
     pub const STORAGE_INFO: &str = "storage_info";
+    /// `{ since? }` -> `Vec<HistorySample>` (5 s samples, last 2 h).
+    pub const HISTORY: &str = "history";
     /// `{ path, mode: "move" | "fresh" }`: change the cache folder (background job).
     pub const STORAGE_RELOCATE: &str = "storage_relocate";
     pub const SUBSCRIBE: &str = "subscribe";
@@ -191,6 +193,19 @@ pub struct Status {
     pub prefetch: PrefetchStatus,
     #[serde(default)]
     pub storage: StorageStatus,
+}
+
+/// One activity sample (cumulative counters; rates are differences).
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct HistorySample {
+    /// Unix seconds.
+    pub t: f64,
+    /// Bytes downloaded since the daemon started (imagery + meshes).
+    pub download_bytes: u64,
+    /// Imagery + mesh cache size on disk.
+    pub cache_bytes: u64,
+    /// Combined cache cap (imagery + mesh).
+    pub cache_cap_bytes: u64,
 }
 
 /// Where the caches live and any relocation in progress.

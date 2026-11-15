@@ -1,4 +1,6 @@
 :root {
+  --series-rate: #2a78d6;
+  --series-cache: #1baf7a;
   --bg: #f4f6f4;
   --panel: #ffffff;
   --ink: #18221d;
@@ -14,6 +16,8 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
+    --series-rate: #3987e5;
+    --series-cache: #199e70;
     --bg: #111614;
     --panel: #18201c;
     --ink: #e4ece7;
@@ -92,6 +96,29 @@ body.simple .side { display: none; }
 }
 .card h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .card.wide { width: 100%; }
+/* Activity: two single-series time charts (download rate, cache size). */
+.card.activity { margin-bottom: 12px; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.chart { margin: 0; position: relative; }
+.chart figcaption { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.chart .label { color: var(--muted); font-size: 12px; }
+.chart .value { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.chart svg { display: block; width: 100%; height: 96px; overflow: visible; }
+.chart svg text { fill: var(--muted); font-size: 10px; }
+.chart .grid-line { stroke: var(--line); stroke-width: 1; }
+.chart .series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .area { opacity: .12; }
+.chart .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 2; }
+.chart .dot { stroke: var(--panel); stroke-width: 2; }
+.chart .tip {
+  position: absolute; top: 22px; pointer-events: none; transform: translateX(-50%);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 2px 8px; font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+#ch-rate .series { stroke: var(--series-rate); }
+#ch-rate .area, #ch-rate .dot { fill: var(--series-rate); }
+#ch-cache .series { stroke: var(--series-cache); }
+#ch-cache .area, #ch-cache .dot { fill: var(--series-cache); }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
 dt { color: var(--muted); }
 dd { margin: 0; overflow-wrap: anywhere; }

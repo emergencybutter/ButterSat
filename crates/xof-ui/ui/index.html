@@ -32,6 +32,21 @@
   <main>
     <section id="overview" class="view active">
       <div id="banner" class="banner hidden"></div>
+      <div class="card activity">
+        <h3>Activity <span class="muted">· last 30 min</span></h3>
+        <div class="charts">
+          <figure class="chart" id="ch-rate" aria-label="Download rate over the last 30 minutes">
+            <figcaption><span class="label">Download rate</span><span class="value" id="v-rate">–</span></figcaption>
+            <svg role="img"></svg>
+            <div class="tip hidden"></div>
+          </figure>
+          <figure class="chart" id="ch-cache" aria-label="Cache size over the last 30 minutes">
+            <figcaption><span class="label">Cache size</span><span class="value" id="v-cache">–</span></figcaption>
+            <svg role="img"></svg>
+            <div class="tip hidden"></div>
+          </figure>
+        </div>
+      </div>
       <div class="grid">
         <div class="card">
           <h3>Scenery</h3>

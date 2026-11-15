@@ -25,6 +25,107 @@ function show(view) {
 }
 window.addEventListener("hashchange", () => show(location.hash.slice(1) || "overview"));
 
+// ---------------------------------------------------------------- activity charts
+// Daemon samples cumulative counters every 5 s (2 h kept); we chart the
+// last 30 min: download rate (differences) and cache size.
+const WINDOW_S = 30 * 60;
+let history = [];
+
+const fmtRate = (bps) => (bps >= 1048576 ? (bps / 1048576).toFixed(1) + " MB/s" : (bps / 1024).toFixed(0) + " KB/s");
+const fmtSize = (b) => (b >= 1073741824 ? (b / 1073741824).toFixed(2) + " GB" : (b / 1048576).toFixed(0) + " MB");
+const ago = (s) => (s < 60 ? `${Math.round(s)} s ago` : `${Math.round(s / 60)} min ago`);
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+// Nice upper bound for the y axis.
+function niceMax(v) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p;
+  return 10 * p;
+}
+
+function drawChart(fig, points, fmt, valueId) {
+  // points: [{t, v}] oldest first, t in unix seconds.
+  const svg = fig.querySelector("svg");
+  const tip = fig.querySelector(".tip");
+  svg.replaceChildren();
+  const W = svg.clientWidth || 300, H = 96, L = 4, R = 4, T = 14, B = 14;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const now = Date.now() / 1000;
+  const x = (t) => L + ((t - (now - WINDOW_S)) / WINDOW_S) * (W - L - R);
+  const ymax = niceMax(Math.max(0, ...points.map((p) => p.v)));
+  const y = (v) => T + (1 - v / ymax) * (H - T - B);
+  el("line", { x1: L, x2: W - R, y1: y(0), y2: y(0), class: "grid-line" }, svg);
+  el("line", { x1: L, x2: W - R, y1: y(ymax), y2: y(ymax), class: "grid-line" }, svg);
+  el("text", { x: L, y: T - 4 }, svg).textContent = fmt(ymax);
+  el("text", { x: L, y: H - 2 }, svg).textContent = "30 min ago";
+  el("text", { x: W - R, y: H - 2, "text-anchor": "end" }, svg).textContent = "now";
+  $(valueId).textContent = points.length ? fmt(points[points.length - 1].v) : "–";
+  if (points.length < 2) return;
+  const d = points.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
+  el("path", { d: `${d}L${x(points[points.length - 1].t).toFixed(1)},${y(0)}L${x(points[0].t).toFixed(1)},${y(0)}Z`, class: "area" }, svg);
+  el("path", { d, class: "series" }, svg);
+  const cross = el("line", { y1: T, y2: H - B, class: "cross", visibility: "hidden" }, svg);
+  const dot = el("circle", { r: 4, class: "dot", visibility: "hidden" }, svg);
+  // Hover: nearest sample to the pointer.
+  const hit = el("rect", { x: 0, y: 0, width: W, height: H, fill: "transparent" }, svg);
+  hit.addEventListener("pointermove", (ev) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((ev.clientX - r.left) / r.width) * W;
+    let best = points[0];
+    for (const p of points) if (Math.abs(x(p.t) - px) < Math.abs(x(best.t) - px)) best = p;
+    const bx = x(best.t);
+    cross.setAttribute("x1", bx);
+    cross.setAttribute("x2", bx);
+    dot.setAttribute("cx", bx);
+    dot.setAttribute("cy", y(best.v));
+    cross.setAttribute("visibility", "visible");
+    dot.setAttribute("visibility", "visible");
+    tip.textContent = `${fmt(best.v)} · ${ago(now - best.t)}`;
+    tip.style.left = `${(bx / W) * 100}%`;
+    tip.classList.remove("hidden");
+  });
+  hit.addEventListener("pointerleave", () => {
+    cross.setAttribute("visibility", "hidden");
+    dot.setAttribute("visibility", "hidden");
+    tip.classList.add("hidden");
+  });
+}
+
+function renderActivity() {
+  const cut = Date.now() / 1000 - WINDOW_S;
+  const h = history.filter((s) => s.t >= cut - 10);
+  const rate = [];
+  for (let i = 1; i < h.length; i++) {
+    const dt = h[i].t - h[i - 1].t;
+    // Counter resets (daemon restart) show as zero, never negative.
+    if (dt > 0) rate.push({ t: h[i].t, v: Math.max(0, h[i].download_bytes - h[i - 1].download_bytes) / dt });
+  }
+  drawChart($("ch-rate"), rate.filter((p) => p.t >= cut), fmtRate, "v-rate");
+  const cache = h.filter((s) => s.t >= cut).map((s) => ({ t: s.t, v: s.cache_bytes }));
+  drawChart($("ch-cache"), cache, fmtSize, "v-cache");
+  const last = h[h.length - 1];
+  if (last && last.cache_cap_bytes) $("v-cache").textContent += ` of ${fmtGB(last.cache_cap_bytes)}`;
+}
+
+async function refreshHistory() {
+  try {
+    const since = history.length ? history[history.length - 1].t : 0;
+    const add = await rpc("history", { since });
+    history = history.concat(add).slice(-1440);
+    renderActivity();
+  } catch (_) {}
+}
+refreshHistory();
+setInterval(refreshHistory, 5000);
+window.addEventListener("resize", () => renderActivity());
+
 // ---------------------------------------------------------------- simple / advanced
 // Simple mode shows the overview only in a small window; "Advanced" reveals
 // every page and widens the window. The choice is remembered per viewer.

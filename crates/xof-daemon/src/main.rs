@@ -136,6 +136,11 @@ async fn run(app: Arc<App>, auto_mount: bool) -> anyhow::Result<()> {
             let mut n = 0u64;
             loop {
                 tick.tick().await;
+                if n % 5 == 0 {
+                    let h = a.clone();
+                    let _ = tokio::task::spawn_blocking(move || h.sample_history()).await;
+                }
+                n += 1;
                 if a.events.receiver_count() == 0 {
                     continue;
                 }
@@ -143,10 +148,9 @@ async fn run(app: Arc<App>, auto_mount: bool) -> anyhow::Result<()> {
                 if let Some(ac) = a.web.aircraft.borrow().clone() {
                     let _ = a.events.send(Event::Aircraft(ac));
                 }
-                if n % 30 == 0 {
+                if n % 30 == 1 {
                     let _ = a.events.send(Event::Health(a.health()));
                 }
-                n += 1;
             }
         });
     }

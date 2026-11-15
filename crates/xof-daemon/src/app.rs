@@ -16,8 +16,8 @@ use xof_core::{provider, DsfTile};
 use xof_mesh::{MeshConfig, MeshStreamer};
 use xof_proto::config::{DaemonConfig, Dirs, DEFAULT_MESH_KEYS};
 use xof_proto::{
-    method, CacheStats, Event, EvictArea, HealthCheck, HealthReport, PackInfo, PrepareDeparture, PrepareResult,
-    Severity, Status, StorageJob, StorageRelocate, StorageStatus, XPlaneInfo,
+    method, CacheStats, Event, EvictArea, HealthCheck, HealthReport, HistorySample, PackInfo, PrepareDeparture,
+    PrepareResult, Severity, Status, StorageJob, StorageRelocate, StorageStatus, XPlaneInfo,
 };
 use xof_vfs::{Scenery, SceneryConfig};
 
@@ -42,6 +42,10 @@ pub struct App {
     cache_root: Mutex<PathBuf>,
     storage_error: Mutex<Option<String>>,
     storage_job: Mutex<Option<StorageJob>>,
+    history: Mutex<std::collections::VecDeque<HistorySample>>,
+    /// Download bytes from engines/streamers replaced by a rebuild, so the
+    /// cumulative counter never goes backwards.
+    download_base: Mutex<(u64, u64)>,
     stack: Mutex<Stack>,
     mount: Mutex<Option<xof_vfs::Mounted>>,
     mount_error: Mutex<Option<String>>,
@@ -167,6 +171,8 @@ impl App {
             cache_root: Mutex::new(cache_root),
             storage_error: Mutex::new(storage_error),
             storage_job: Mutex::new(None),
+            history: Mutex::new(std::collections::VecDeque::new()),
+            download_base: Mutex::new((0, 0)),
             stack: Mutex::new(stack),
             mount: Mutex::new(None),
             mount_error: Mutex::new(None),
@@ -430,6 +436,48 @@ impl App {
             add("defender", "Windows Defender", Severity::Info, "Excluding the mount and cache folders from real-time scanning avoids needless downloads".into(), Some("The installer offers this; or add the folders under Windows Security → Virus & threat protection → Exclusions."));
         }
         HealthReport { checks }
+    }
+
+    /// Total bytes downloaded (imagery + meshes), monotonic across rebuilds.
+    fn downloaded(&self) -> u64 {
+        let (img, mesh) = {
+            let st = self.stack.lock();
+            (st.engine.stats().fetch_bytes, st.mesh.as_ref().map(|m| m.status().download_bytes).unwrap_or(0))
+        };
+        let mut base = self.download_base.lock();
+        // A rebuilt engine/streamer starts from zero: keep what was counted.
+        if img + mesh < base.1 {
+            base.0 += base.1;
+        }
+        base.1 = img + mesh;
+        base.0 + base.1
+    }
+
+    /// Record one activity sample (every 5 s; 2 h kept).
+    pub fn sample_history(&self) {
+        let c = self.cache_stats_light();
+        let s = HistorySample {
+            t: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(0.0),
+            download_bytes: self.downloaded(),
+            cache_bytes: c.0,
+            cache_cap_bytes: c.1,
+        };
+        let mut h = self.history.lock();
+        h.push_back(s);
+        while h.len() > 1440 {
+            h.pop_front();
+        }
+    }
+
+    /// Cache bytes and cap without listing areas.
+    fn cache_stats_light(&self) -> (u64, u64) {
+        let cfg = self.cfg.lock().clone();
+        let mesh = self.stack.lock().mesh.clone();
+        let bytes = self.store.total_bytes().unwrap_or(0) + mesh.as_ref().map(|m| m.status().cache_bytes).unwrap_or(0);
+        (bytes, (cfg.imagery.cache_size_gb + cfg.mesh.cache_size_gb) << 30)
     }
 
     pub fn cache_stats(&self) -> CacheStats {
@@ -825,6 +873,11 @@ impl App {
                     })
                     .collect();
                 Ok(json!(packs))
+            }
+            method::HISTORY => {
+                let since = params.get("since").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let h: Vec<HistorySample> = self.history.lock().iter().filter(|s| s.t > since).copied().collect();
+                Ok(json!(h))
             }
             method::STORAGE_INFO => {
                 #[derive(serde::Deserialize)]
