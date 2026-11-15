@@ -122,7 +122,9 @@ impl Xp {
         let rb = self
             .http
             .post(format!("{}/v3/flight", self.root))
-            .timeout(Duration::from_secs(300))
+            // X-Plane often keeps the request open while loading; the caller
+            // then waits for datarefs, so a long timeout here only wastes time.
+            .timeout(Duration::from_secs(60))
             .json(&json!({ "data": init }));
         match self.json(rb).await {
             Ok(_) => Ok(()),

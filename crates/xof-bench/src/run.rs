@@ -55,11 +55,19 @@ pub async fn run(sc: &Scenario, variants: &[Variant], opts: &RunOpts, run_dir: &
         for repeat in 0..opts.repeat {
             for v in variants {
                 log(format!("=== variant {} (run {}) ===", v.name, repeat + 1));
-                let mut vr = VariantRun { variant: v.name.clone(), repeat, ..Default::default() };
-                let r = run_variant(sc, v, opts, run_dir, &xp, &mut packs, origin.as_ref(), &mut vr, &mut rec).await;
-                if let Err(e) = &r {
-                    log(format!("variant {} failed: {e:#}", v.name));
+                let mut vr = VariantRun::default();
+                // A flight that never gets going (X-Plane wedged at start) is
+                // retried once from scratch; failures after the first spot are kept.
+                for attempt in 1..=2 {
+                    vr = VariantRun { variant: v.name.clone(), repeat, ..Default::default() };
+                    let r =
+                        run_variant(sc, v, opts, run_dir, &xp, &mut packs, origin.as_ref(), &mut vr, &mut rec).await;
+                    let Err(e) = r else { break };
+                    log(format!("variant {} failed (attempt {attempt}): {e:#}", v.name));
                     vr.error = Some(format!("{e:#}"));
+                    if !vr.spots.is_empty() {
+                        break;
+                    }
                 }
                 rec.runs.push(vr);
                 std::fs::write(run_dir.join("run.json"), serde_json::to_vec_pretty(&rec)?)?;
@@ -106,6 +114,17 @@ async fn run_variant(
         dmn = Some(Daemon::start(&exe, &home, &cfg).await?);
     }
     let r = fly(sc, v, opts, run_dir, xp, dmn.as_ref(), vr, rec).await;
+    if r.is_err() {
+        // What was on screen (a dialog?) before X-Plane is killed.
+        let dir = run_dir.join("failures");
+        let _ = std::fs::create_dir_all(&dir);
+        let stamp =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let png = dir.join(format!("{}-{}-{stamp}.png", v.name, vr.repeat));
+        if capture_desktop(&png) {
+            log(format!("desktop captured: {}", png.display()));
+        }
+    }
     let _ = xp::ensure_stopped().await;
     if let Some(mut d) = dmn {
         vr.daemon_end = d.engine().await;
@@ -208,6 +227,27 @@ async fn fly(
     let _ = monitor.await;
     vr.frames = std::mem::take(&mut *frames.lock());
     res
+}
+
+/// Screenshot of the whole desktop (Windows only; best effort).
+fn capture_desktop(path: &Path) -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+    let script = format!(
+        "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; \
+         $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \
+         $bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height; \
+         [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size); \
+         $bmp.Save('{}')",
+        path.display().to_string().replace('\'', "''")
+    );
+    std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+        && path.exists()
 }
 
 fn sanitize(s: &str) -> String {
