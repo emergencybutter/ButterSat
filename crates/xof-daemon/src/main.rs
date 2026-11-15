@@ -117,6 +117,7 @@ async fn run(app: Arc<App>, auto_mount: bool) -> anyhow::Result<()> {
         }
     }
     tokio::spawn(app.clone().housekeeping());
+    tokio::spawn(app.clone().sim_phase());
     {
         let a = app.clone();
         tokio::spawn(async move {

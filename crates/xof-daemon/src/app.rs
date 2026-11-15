@@ -216,6 +216,7 @@ impl App {
                 global_scenery: xplane::global_scenery(p).map(|g| g.display().to_string()),
             }),
             sim_connected: *self.web.connected.borrow(),
+            sim_loading: self.web.loading(),
             aircraft: self.web.aircraft.borrow().clone(),
             provider: stack.engine.provider().name().to_string(),
             engine: stack.engine.stats(),
@@ -387,6 +388,30 @@ impl App {
             areas: self.store.areas().unwrap_or_default(),
             mesh_bytes: mesh.as_ref().map(|m| m.status().cache_bytes).unwrap_or(0),
             mesh_cap_bytes: cfg.mesh.cache_size_gb << 30,
+        }
+    }
+
+    /// Sim phase -> live-read budget (design §5.3): long while X-Plane loads,
+    /// short in flight. Re-applied every tick, so a rebuilt engine picks it up.
+    pub async fn sim_phase(self: Arc<Self>) {
+        let mut tick = tokio::time::interval(Duration::from_millis(250));
+        let mut was: Option<bool> = None;
+        loop {
+            tick.tick().await;
+            let loading = self.web.loading();
+            let (d_fly, d_load) = {
+                let c = self.config();
+                (c.imagery.deadline_ms, c.imagery.loading_deadline_ms.max(c.imagery.deadline_ms))
+            };
+            self.stack.lock().engine.set_live_deadline_ms(if loading { d_load } else { d_fly });
+            if was != Some(loading) {
+                tracing::info!(
+                    "sim {}: read budget {} ms",
+                    if loading { "loading" } else { "running" },
+                    if loading { d_load } else { d_fly }
+                );
+                was = Some(loading);
+            }
         }
     }
 

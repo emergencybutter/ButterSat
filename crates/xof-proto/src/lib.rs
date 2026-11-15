@@ -177,6 +177,9 @@ pub struct Status {
     pub mount_error: Option<String>,
     pub xplane: Option<XPlaneInfo>,
     pub sim_connected: bool,
+    /// X-Plane is loading scenery (or not running): long read budget.
+    #[serde(default)]
+    pub sim_loading: bool,
     pub aircraft: Option<AircraftState>,
     pub provider: String,
     pub engine: EngineStatsSnapshot,

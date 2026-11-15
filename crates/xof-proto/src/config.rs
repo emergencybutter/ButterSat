@@ -77,7 +77,11 @@ pub struct ImageryConfig {
     pub provider: String,
     /// The user acknowledged the provider's terms notice.
     pub provider_notice_accepted: bool,
+    /// Live-read budget in flight.
     pub deadline_ms: u64,
+    /// Budget while X-Plane is loading (loading screen: nothing to stall,
+    /// and degraded bands would stay for the whole session).
+    pub loading_deadline_ms: u64,
     pub cache_size_gb: u64,
     pub segment_ram_mb: usize,
     pub decoded_ram_mb: usize,
@@ -89,6 +93,7 @@ impl Default for ImageryConfig {
             provider: "esri".into(),
             provider_notice_accepted: false,
             deadline_ms: 1200,
+            loading_deadline_ms: 20_000,
             cache_size_gb: 100,
             segment_ram_mb: 1024,
             decoded_ram_mb: 256,

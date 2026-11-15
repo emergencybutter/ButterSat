@@ -130,6 +130,7 @@ pub fn engine_delta(a: &EngineStatsSnapshot, b: &EngineStatsSnapshot) -> EngineS
         segment_ram_bytes: b.segment_ram_bytes,
         decoded_ram_bytes: b.decoded_ram_bytes,
         reduced_zoom: b.reduced_zoom,
+        deadline_ms: b.deadline_ms,
     }
 }
 

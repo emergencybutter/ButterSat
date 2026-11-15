@@ -100,6 +100,9 @@ pub struct EngineStatsSnapshot {
     pub segment_ram_bytes: u64,
     pub decoded_ram_bytes: u64,
     pub reduced_zoom: bool,
+    /// Current live-read budget (changes with the sim phase).
+    #[serde(default)]
+    pub deadline_ms: u64,
 }
 
 const LATENCY_BOUNDS: [u64; 6] = [10, 50, 200, 1000, 3000, u64::MAX];
@@ -119,6 +122,8 @@ struct Inner {
     inflight: Mutex<HashMap<SegKey, SegFuture>>,
     upgrading: Mutex<HashSet<SegKey>>,
     reduced_zoom: AtomicBool,
+    /// Live-read budget; starts at `cfg.deadline_ms`, set by the daemon per sim phase.
+    live_deadline_ms: AtomicU64,
     stats: EngineStats,
     cpu: rayon::ThreadPool,
 }
@@ -140,6 +145,7 @@ impl TextureEngine {
                 decoded: ByteLru::new(cfg.decoded_ram_mb << 20),
                 fetcher: Fetcher::new(provider)?,
                 store,
+                live_deadline_ms: AtomicU64::new(cfg.deadline_ms),
                 cfg,
                 inflight: Mutex::new(HashMap::new()),
                 upgrading: Mutex::new(HashSet::new()),
@@ -162,9 +168,21 @@ impl TextureEngine {
         &self.inner.store
     }
 
-    /// Default live-read context using the configured deadline.
+    /// Default live-read context using the current deadline.
     pub fn live_ctx(&self) -> ReadCtx {
-        ReadCtx::xplane(Duration::from_millis(self.inner.cfg.deadline_ms))
+        ReadCtx::xplane(Duration::from_millis(self.live_deadline_ms()))
+    }
+
+    /// Change the live-read budget. While X-Plane shows its loading screen
+    /// there is no frame to protect, and a band served degraded then is never
+    /// re-read (X-Plane reads each texture once per load), so the daemon
+    /// raises the budget for the duration of the load.
+    pub fn set_live_deadline_ms(&self, ms: u64) {
+        self.inner.live_deadline_ms.store(ms, Ordering::Relaxed);
+    }
+
+    pub fn live_deadline_ms(&self) -> u64 {
+        self.inner.live_deadline_ms.load(Ordering::Relaxed)
     }
 
     /// Read `[off, off+len)` of a synthesized texture.
@@ -260,6 +278,7 @@ impl TextureEngine {
             segment_ram_bytes: self.inner.segs.used() as u64,
             decoded_ram_bytes: self.inner.decoded.used() as u64,
             reduced_zoom: self.reduced_zoom(),
+            deadline_ms: self.live_deadline_ms(),
         }
     }
 

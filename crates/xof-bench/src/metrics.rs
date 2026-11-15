@@ -48,6 +48,7 @@ pub fn sharpness(l: &Luma) -> f64 {
 }
 
 /// Mean SSIM over non-overlapping 8x8 windows.
+#[cfg(test)]
 pub fn ssim(a: &Luma, b: &Luma) -> f64 {
     ssim_at(a, b, 0, 0)
 }
