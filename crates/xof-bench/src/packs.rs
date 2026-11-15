@@ -42,8 +42,18 @@ impl PackGuard {
 
     /// Configure packs for a variant: link `packs`, enable them and (if `xof`)
     /// our mount; disable the other bench packs, xporthofs when not under
-    /// test, and `disable` (names, case-insensitive).
-    pub fn apply(&mut self, variant: &str, packs: &[PathBuf], xof: bool, disable: &[String]) -> anyhow::Result<()> {
+    /// test, and `disable` (names, case-insensitive). With `isolate`, every
+    /// other Custom Scenery pack is disabled too, including folders missing
+    /// from the ini (X-Plane would add those enabled); `*GLOBAL_AIRPORTS*`
+    /// stays.
+    pub fn apply(
+        &mut self,
+        variant: &str,
+        packs: &[PathBuf],
+        xof: bool,
+        disable: &[String],
+        isolate: bool,
+    ) -> anyhow::Result<()> {
         self.clear_links();
         let mut names = Vec::new();
         for (i, p) in packs.iter().enumerate() {
@@ -53,12 +63,17 @@ impl PackGuard {
             self.links.push(link);
             names.push(name);
         }
+        let mut base = self.original.clone();
+        if isolate {
+            base = add_unlisted_disabled(&base, &self.custom);
+        }
         let mut ini = xplane::set_packs_enabled(
-            &self.original,
+            &base,
             |n| {
                 n.starts_with(LINK_PREFIX)
                     || (!xof && n.eq_ignore_ascii_case(xplane::PACK_NAME))
                     || disable.iter().any(|d| d.eq_ignore_ascii_case(n))
+                    || (isolate && !n.eq_ignore_ascii_case(xplane::PACK_NAME))
             },
             false,
         );
@@ -90,6 +105,27 @@ impl Drop for PackGuard {
     fn drop(&mut self) {
         self.restore();
     }
+}
+
+/// Append a disabled line for every Custom Scenery folder the ini doesn't list.
+fn add_unlisted_disabled(ini: &str, custom: &Path) -> String {
+    let listed: Vec<String> = ini.lines().filter_map(xplane::pack_line_name).map(|n| n.to_ascii_lowercase()).collect();
+    let mut out = ini.trim_end().to_string();
+    out.push('\n');
+    let mut extra: Vec<String> = std::fs::read_dir(custom)
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.path().is_dir())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .filter(|n| !n.starts_with(LINK_PREFIX) && !listed.contains(&n.to_ascii_lowercase()))
+                .collect()
+        })
+        .unwrap_or_default();
+    extra.sort();
+    for n in extra {
+        out.push_str(&format!("SCENERY_PACK_DISABLED Custom Scenery/{n}/\n"));
+    }
+    out
 }
 
 fn write_atomic(p: &Path, text: &str) -> anyhow::Result<()> {
@@ -147,7 +183,7 @@ mod tests {
         std::fs::write(custom.join("scenery_packs.ini"), ini).unwrap();
         {
             let mut g = PackGuard::new(&root).unwrap();
-            g.apply("ref", &[pack.clone()], false, &["NYC".into()]).unwrap();
+            g.apply("ref", &[pack.clone()], false, &["NYC".into()], false).unwrap();
             let now = std::fs::read_to_string(custom.join("scenery_packs.ini")).unwrap();
             assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/nyc/"));
             assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/z_xporthofs/"));
@@ -157,10 +193,25 @@ mod tests {
             assert!(ours < mesh);
             assert!(custom.join("z_xofbench_ref_0/Earth nav data").is_dir());
 
-            g.apply("xof", &[], true, &[]).unwrap();
+            g.apply("xof", &[], true, &[], false).unwrap();
             let now = std::fs::read_to_string(custom.join("scenery_packs.ini")).unwrap();
             assert!(now.contains("SCENERY_PACK Custom Scenery/z_xporthofs/"));
             assert!(!custom.join("z_xofbench_ref_0").exists());
+
+            // Isolation: everything else off, unlisted folders added disabled.
+            std::fs::create_dir_all(custom.join("Unlisted Pack")).unwrap();
+            g.apply("ref", &[pack.clone()], false, &[], true).unwrap();
+            let now = std::fs::read_to_string(custom.join("scenery_packs.ini")).unwrap();
+            assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/KJFK/"));
+            assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/zzz_mesh/"));
+            assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/Unlisted Pack/"));
+            assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/z_xporthofs/"));
+            assert!(now.contains("SCENERY_PACK *GLOBAL_AIRPORTS*"));
+            assert!(now.contains("SCENERY_PACK Custom Scenery/z_xofbench_ref_0/"));
+            g.apply("xof", &[], true, &[], true).unwrap();
+            let now = std::fs::read_to_string(custom.join("scenery_packs.ini")).unwrap();
+            assert!(now.contains("SCENERY_PACK Custom Scenery/z_xporthofs/"));
+            assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/KJFK/"));
         }
         assert_eq!(std::fs::read_to_string(custom.join("scenery_packs.ini")).unwrap(), ini);
         assert!(pack.join("Earth nav data").is_dir(), "link removal must not touch the target");

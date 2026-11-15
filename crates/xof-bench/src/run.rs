@@ -88,7 +88,7 @@ async fn run_variant(
 ) -> anyhow::Result<()> {
     xp::ensure_stopped().await?;
     xp.reset();
-    packs.apply(&v.name, &v.packs, v.xof, &sc.disable_packs)?;
+    packs.apply(&v.name, &v.packs, v.xof, &sc.disable_packs, sc.isolate_packs)?;
 
     let mut dmn = None;
     if v.xof {
@@ -171,7 +171,7 @@ async fn fly(
             let mut sr =
                 SpotRun { spot: spot.name.clone(), slew_start: t0.elapsed().as_secs_f64(), ..Default::default() };
             if i > 0 {
-                let d = slew_to(xp, spot, sc.slew_speed_kt * KT).await?;
+                let d = slew_to(xp, spot, spot.slew_speed_kt.unwrap_or(sc.slew_speed_kt) * KT).await?;
                 log(format!("slewed to {} ({:.1} km)", spot.name, d / 1000.0));
             }
             camera(xp, sc.fov_deg).await?;
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn offsets() {
-        let s = Spot { name: "x".into(), lat: 40.65, lon: -73.77, alt_ft: 1000.0 };
+        let s = Spot { name: "x".into(), lat: 40.65, lon: -73.77, alt_ft: 1000.0, slew_speed_kt: None };
         let (e, n, u) = offset(40.64, -73.78, 0.0, &s);
         assert!((e - 844.0).abs() < 5.0, "{e}");
         assert!((n - 1105.7).abs() < 1.0, "{n}");

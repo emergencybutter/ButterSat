@@ -8,13 +8,24 @@ fov_deg = 60
 compare_to = "reference"
 origin = "../../xporthofs-build/origin"
 public_keys = ["7edb3db45bc7858959a6347242b3804b7f360012446389288f417323290ddf94"]
-disable_packs = ["nyc"]
+# Every other Custom Scenery pack is disabled during runs (isolate_packs,
+# on by default): only X-Plane's base scenery, global airports and the
+# variant's own scenery are loaded.
+
+# Start outside the catalogued area, so X-Plane loads the NYC tiles in
+# flight: the first leg tests in-flight streaming (reads, stalls).
+[[spot]]
+name = "Reading PA (outside catalog)"
+lat = 40.3400
+lon = -75.9300
+alt_ft = 3000
 
 [[spot]]
 name = "JFK (ZL17)"
 lat = 40.6413
 lon = -73.7781
 alt_ft = 3000
+slew_speed_kt = 450
 
 [[spot]]
 name = "Jamaica Bay (water masks)"

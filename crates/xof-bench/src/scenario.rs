@@ -36,6 +36,11 @@ pub struct Scenario {
     /// ortho packs covering the same area).
     #[serde(default)]
     pub disable_packs: Vec<String>,
+    /// Disable every Custom Scenery pack except the variant's own (default):
+    /// only X-Plane's base scenery and global airports remain, so results
+    /// don't depend on the machine's add-ons.
+    #[serde(default = "default_true")]
+    pub isolate_packs: bool,
     /// Variant whose final screenshots are the similarity reference.
     #[serde(default)]
     pub compare_to: Option<String>,
@@ -53,6 +58,9 @@ pub struct Spot {
     pub lon: f64,
     /// Camera altitude, feet MSL.
     pub alt_ft: f64,
+    /// Slew speed for the leg that ends here (default: `slew_speed_kt`).
+    #[serde(default)]
+    pub slew_speed_kt: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -89,6 +97,10 @@ fn strip_verbatim(p: PathBuf) -> PathBuf {
     let stripped =
         p.to_str().and_then(|s| s.strip_prefix(r"\\?\")).filter(|rest| !rest.starts_with("UNC")).map(PathBuf::from);
     stripped.unwrap_or(p)
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_aircraft() -> String {

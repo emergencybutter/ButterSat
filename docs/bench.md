@@ -34,8 +34,11 @@ originals) and `homes/` (daemon logs, config and caches of cold runs).
 See `bench/nyc.toml`. Top level: `name`, `aircraft`, `day_of_year`,
 `local_time_h`, `slew_speed_kt`, `fov_deg`, `shots_s`, `origin` (a local
 catalog folder containing `v1/`, served on 127.0.0.1 for `xof` variants),
-`public_keys`, `disable_packs`, `compare_to`. `[[spot]]` has `name`, `lat`,
-`lon`, `alt_ft` (MSL). `[[variant]]` has:
+`public_keys`, `disable_packs`, `isolate_packs` (default `true`: every other
+Custom Scenery pack is disabled, including folders missing from the ini, so
+only X-Plane's base scenery and global airports remain), `compare_to`.
+`[[spot]]` has `name`, `lat`, `lon`, `alt_ft` (MSL) and an optional
+`slew_speed_kt` for the leg that ends there. `[[variant]]` has:
 
 | key | meaning |
 |---|---|
