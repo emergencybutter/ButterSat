@@ -51,19 +51,29 @@ pub struct Shot {
     pub thumb: Option<String>,
     #[serde(default)]
     pub sharpness: Option<f64>,
-    /// SSIM against the comparison variant's final shot of the same spot.
+    /// SSIM against the comparison variant's final shot of the same spot,
+    /// after alignment.
     #[serde(default)]
     pub similarity: Option<f64>,
+    /// Offset (px) that aligned this shot with the reference.
+    #[serde(default)]
+    pub offset_px: Option<(i32, i32)>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct FrameSample {
     pub t: f64,
-    /// `sim/time/framerate_period` (s); NaN when the request failed.
+    /// `sim/time/framerate_period` (s); NaN when the request failed
+    /// (written as `null` in JSON).
+    #[serde(deserialize_with = "nan_if_null")]
     pub period: f64,
     /// Round trip of the request (s): X-Plane answers between frames, so a
     /// long round trip is a stall even if the period is averaged.
     pub latency: f64,
+}
+
+fn nan_if_null<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    Ok(Option::<f64>::deserialize(d)?.unwrap_or(f64::NAN))
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -138,5 +148,13 @@ mod tests {
         assert!((s.stall_max_ms - 500.0).abs() < 1e-6);
         assert!(s.stalls_per_min > 5.0);
         assert_eq!(frame_stats(&f, 20.0, 30.0).samples, 0);
+    }
+
+    #[test]
+    fn nan_round_trips_through_null() {
+        let j = serde_json::to_string(&FrameSample { t: 1.0, period: f64::NAN, latency: 0.1 }).unwrap();
+        assert!(j.contains("null"));
+        let back: FrameSample = serde_json::from_str(&j).unwrap();
+        assert!(back.period.is_nan());
     }
 }

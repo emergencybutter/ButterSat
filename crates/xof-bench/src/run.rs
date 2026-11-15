@@ -295,7 +295,8 @@ async fn slew_to(xp: &Xp, s: &Spot, speed: f64) -> anyhow::Result<f64> {
         let p = read().await?;
         let (e, n, u) = offset(p[0], p[1], p[2], s);
         let d = (e * e + n * n + u * u).sqrt();
-        if d < 2.0 {
+        // Tight: at 3000 ft one screenshot pixel is ~0.4 m, and runs are compared pixel by pixel.
+        if d < 0.15 {
             return Ok(total);
         }
         let dt = last.elapsed().as_secs_f64().clamp(0.0, 0.25);

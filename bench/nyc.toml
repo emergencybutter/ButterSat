@@ -71,3 +71,10 @@ name = "xof-warm"
 description = "xporthofs, persistent caches (warm from the second run)"
 xof = true
 cache = "persistent"
+
+[[variant]]
+name = "xof-patient"
+description = "xporthofs, cold caches, 30 s read budget (never serve blurry bands)"
+xof = true
+[variant.config.imagery]
+deadline_ms = 30000
