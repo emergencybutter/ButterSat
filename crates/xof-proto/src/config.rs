@@ -8,11 +8,11 @@ use xof_mesh::Coverage;
 
 /// Default mesh origins. The manifest's own `mirrors` list is used after the
 /// first successful fetch.
-pub const DEFAULT_MESH_MIRRORS: &[&str] = &["https://mesh.buttersat.org/v1"];
+pub const DEFAULT_MESH_MIRRORS: &[&str] = &["https://satsrv.butr.cc/v1"];
 
 /// Trusted manifest signing keys (ed25519, hex). Release builds embed the
 /// project key here; additional keys can be added in config.
-pub const DEFAULT_MESH_KEYS: &[&str] = &[];
+pub const DEFAULT_MESH_KEYS: &[&str] = &["4d80119c5ec547ea0335d62a8ebbaf9a7831bb08849e4379ffdeda0b42757bfb"];
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
