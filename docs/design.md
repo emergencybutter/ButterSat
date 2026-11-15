@@ -216,9 +216,9 @@ then mip levels back-to-back. BC1 level size = `max(1,w/4) * max(1,h/4) * 8`.
 | 2 | 1024 | 524,288 | ZL Z-2, 4×4 tiles |
 | 3 | 512 | 131,072 | ZL Z-3, 2×2 tiles |
 | 4 | 256 | 32,768 | ZL Z-4, 1 tile |
-| 5–12 | 128…1 | 11,064 total | downsampled from mip 4 |
+| 5–12 | 128…1 | 10,936 total | downsampled from mip 4 |
 
-Total file size: **11,184,952 bytes** (128 header + 11,184,824 data).
+Total file size: **11,184,952 bytes** (128 header + 11,184,824 data) — identical to Ortho4XP/nvcompress output, verified on the pilot tile.
 
 Mips 0–4 are built directly from the provider's own lower zoom levels instead
 of downsampling — fewer downloads for distant terrain and better source quality.
@@ -229,7 +229,7 @@ One 256-px source tile row = 64 block rows. For mip 0 that is 512 KiB per tile
 row. So a read `[off, off+len)` maps to: mip level(s) → band(s) of 64 block
 rows → the source tiles in that band. A band is the unit of work and caching.
 
-The header and mips ≥ 4 (~44 KB total, needs 1 tile at Z-4) are produced eagerly
+The header and mips ≥ 4 (~43.7 KB total, needs 1 tile at Z-4) are produced eagerly
 on first open of any texture.
 
 X-Plane at reduced texture quality never reads mip 0; that ZL is then simply
