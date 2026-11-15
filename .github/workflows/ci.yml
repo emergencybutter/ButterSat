@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main, impl]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Linux deps (FUSE, WebKitGTK for Tauri)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fuse3 libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo modprobe fuse || true
+          sudo chmod 666 /dev/fuse || true
+
+      - name: Windows deps (WinFsp driver for mount tests)
+        if: runner.os == 'Windows'
+        run: choco install winfsp -y --no-progress
+
+      - name: macOS deps (macFUSE headers for fuser)
+        if: runner.os == 'macOS'
+        run: brew install --cask macfuse
+
+      - name: Test library crates and tools
+        run: cargo test --workspace --exclude xof-ui
+
+      - name: Build UI
+        run: cargo build -p xof-ui
+
+  deny:
+    name: licences and advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses advisories bans sources
+
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check

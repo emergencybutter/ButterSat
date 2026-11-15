@@ -1,0 +1,55 @@
+# Cold start inside the covered area: the flight loads at JFK, so X-Plane
+# reads every NYC texture behind its loading screen. Measures load time and
+# whether bands served during the load stay degraded.
+name = "nyc-start"
+slew_speed_kt = 250
+shots_s = [0, 5, 20]
+compare_to = "reference"
+origin = "../../xporthofs-build/origin"
+public_keys = ["7edb3db45bc7858959a6347242b3804b7f360012446389288f417323290ddf94"]
+
+[[spot]]
+name = "JFK (ZL17)"
+lat = 40.6413
+lon = -73.7781
+alt_ft = 3000
+
+[[spot]]
+name = "LaGuardia (ZL17)"
+lat = 40.7769
+lon = -73.8740
+alt_ft = 2500
+
+[[spot]]
+name = "Central Park"
+lat = 40.7829
+lon = -73.9654
+alt_ft = 2500
+
+[[spot]]
+name = "Midtown"
+lat = 40.7540
+lon = -73.9840
+alt_ft = 2500
+
+[[spot]]
+name = "Pelham Bay"
+lat = 40.8650
+lon = -73.8100
+alt_ft = 3000
+
+[[variant]]
+name = "reference"
+packs = ["../../xporthofs-build/Ortho4XP/Tiles/zOrtho4XP_+40-074"]
+
+[[variant]]
+name = "xof-load-patient"
+description = "xporthofs, cold: 20 s budget while X-Plane loads (new default)"
+xof = true
+
+[[variant]]
+name = "xof-load-1200"
+description = "xporthofs, cold: 1.2 s budget during the load too (previous behaviour)"
+xof = true
+[variant.config.imagery]
+loading_deadline_ms = 1200

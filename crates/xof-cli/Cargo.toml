@@ -1,0 +1,17 @@
+[package]
+name = "xof-cli"
+description = "Command-line control for the xporthofs daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+xof-core.workspace = true
+xof-proto.workspace = true
+xof-vfs.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tracing-subscriber.workspace = true
+clap.workspace = true
+toml.workspace = true

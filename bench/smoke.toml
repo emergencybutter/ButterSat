@@ -1,0 +1,19 @@
+# Two-spot smoke test of the bench itself (~3 min per variant).
+name = "smoke"
+slew_speed_kt = 300
+shots_s = [0, 5]
+
+[[spot]]
+name = "JFK"
+lat = 40.6413
+lon = -73.7781
+alt_ft = 3000
+
+[[spot]]
+name = "LaGuardia"
+lat = 40.7769
+lon = -73.8740
+alt_ft = 2500
+
+[[variant]]
+name = "default"

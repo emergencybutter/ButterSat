@@ -1,0 +1,20 @@
+[package]
+name = "xof-publish"
+description = "Build, sign and upload the xporthofs mesh catalog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+xof-core.workspace = true
+xof-mesh.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+clap.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+rand.workspace = true
+zstd.workspace = true
+blake3.workspace = true
+rusty-s3 = "0.7"

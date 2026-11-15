@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Main window: daemon RPC passthrough, events, folder picker, open links.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:allow-open", "opener:allow-open-url", "opener:allow-reveal-item-in-dir"]
+}

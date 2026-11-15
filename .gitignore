@@ -2,3 +2,5 @@
 /scratch/
 *.swp
 .DS_Store
+.playwright-mcp/
+/bench-runs/

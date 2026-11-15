@@ -1,0 +1,91 @@
+# NYC pilot benchmark: seven spots inside +40-074 (the tile with an Ortho4XP
+# reference build). Paths are relative to this file and assume the pilot
+# build workspace sits next to the repo (../xporthofs-build).
+name = "nyc"
+slew_speed_kt = 250
+shots_s = [0, 2, 5, 10, 20, 40]
+fov_deg = 60
+compare_to = "reference"
+origin = "../../xporthofs-build/origin"
+public_keys = ["7edb3db45bc7858959a6347242b3804b7f360012446389288f417323290ddf94"]
+# Every other Custom Scenery pack is disabled during runs (isolate_packs,
+# on by default): only X-Plane's base scenery, global airports and the
+# variant's own scenery are loaded.
+
+# Start outside the catalogued area, so X-Plane loads the NYC tiles in
+# flight: the first leg tests in-flight streaming (reads, stalls).
+[[spot]]
+name = "Reading PA (outside catalog)"
+lat = 40.3400
+lon = -75.9300
+alt_ft = 3000
+
+[[spot]]
+name = "JFK (ZL17)"
+lat = 40.6413
+lon = -73.7781
+alt_ft = 3000
+slew_speed_kt = 450
+
+[[spot]]
+name = "Jamaica Bay (water masks)"
+lat = 40.6150
+lon = -73.8350
+alt_ft = 3000
+
+[[spot]]
+name = "LaGuardia (ZL17)"
+lat = 40.7769
+lon = -73.8740
+alt_ft = 2500
+
+[[spot]]
+name = "Central Park"
+lat = 40.7829
+lon = -73.9654
+alt_ft = 2500
+
+[[spot]]
+name = "Midtown"
+lat = 40.7540
+lon = -73.9840
+alt_ft = 2500
+
+[[spot]]
+name = "Pelham Bay"
+lat = 40.8650
+lon = -73.8100
+alt_ft = 3000
+
+[[spot]]
+name = "Hempstead (ZL16 suburbs)"
+lat = 40.7300
+lon = -73.6000
+alt_ft = 3000
+
+[[variant]]
+name = "default"
+description = "X-Plane's own scenery"
+
+[[variant]]
+name = "reference"
+description = "Ortho4XP build of +40-074 (same mesh, nvcompress textures)"
+packs = ["../../xporthofs-build/Ortho4XP/Tiles/zOrtho4XP_+40-074"]
+
+[[variant]]
+name = "xof"
+description = "xporthofs, cold caches"
+xof = true
+
+[[variant]]
+name = "xof-warm"
+description = "xporthofs, persistent caches (warm from the second run)"
+xof = true
+cache = "persistent"
+
+[[variant]]
+name = "xof-patient"
+description = "xporthofs, cold caches, 30 s read budget (never serve blurry bands)"
+xof = true
+[variant.config.imagery]
+deadline_ms = 30000

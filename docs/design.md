@@ -1,6 +1,6 @@
 # xporthofs — Design
 
-Status: draft, pre-implementation (2026-11-14)
+Status: implemented on branch `impl` (2026-11-15); see §18 for status and deviations
 
 xporthofs is a virtual filesystem that presents X-Plane 12 with orthophoto
 scenery. Both the terrain mesh and the textures are streamed: meshes from a
@@ -93,7 +93,7 @@ X-Plane 12 ──Web API (ws, :8086)───────────► │  �
 - **Daemon owns the data plane.** The UI is a pure control plane; closing or
   crashing it never unmounts. The UI spawns the daemon as a detached helper if
   none is running; the daemon only unmounts on explicit `shutdown`.
-- Later: optional start-at-login (Windows: per-user Task Scheduler task;
+- Optional start-at-login (Windows: per-user `HKCU\…\Run` entry;
   Linux: systemd user unit; macOS: launchd agent).
 
 ### Cargo workspace
@@ -101,7 +101,7 @@ X-Plane 12 ──Web API (ws, :8086)───────────► │  �
 | Crate | Responsibility | OS deps |
 |---|---|---|
 | `xof-core` | tile math, DDS layout, providers, fetch, decode, mip generation, BC1 encode, texture cache | none |
-| `xof-mesh` | catalog (fetch, verify, refresh), mesh download/verify, mesh cache, `.ter` synthesis | none |
+| `xof-mesh` | catalog (fetch, verify, refresh), mesh download/verify, Laminar raster splice + raster index, mesh cache, `.ter` synthesis | none |
 | `xof-vfs` | `VfsBackend` trait, shared path → node mapping and PID filter; `fuser` impl (Linux/macOS) and `winfsp` impl (Windows) behind `cfg(target_os)` | libfuse3 / macFUSE / WinFsp |
 | `xof-daemon` | binary: config, mount lifecycle, IPC server, prefetcher, XP12 Web API client | — |
 | `xof-proto` | IPC request/response/event types (serde), shared with UI | none |
@@ -162,10 +162,12 @@ on first run (below overlays, above Global Scenery), backing up the file first.
 
 ### 4.3 Metadata
 - `lookup`/`getattr`/`readdir` are answered from the catalog, the backing dir
-  and filename parsing. They must **never** trigger fetches — X-Plane stats
-  every file at scenery load.
+  and filename parsing. They must **never** trigger network fetches — X-Plane
+  stats every file at scenery load. (Bounded local work is allowed: see DSF
+  size below.)
 - Inodes: stable 64-bit hash of the virtual path (collision-checked in a table).
-- Synthesized DDS size is constant (§5.1); DSF size comes from the catalog.
+- Synthesized DDS size is constant (§5.1). DSF size = catalog `stripped_size`
+  + locally computed Laminar raster size (§6.2).
 
 ### 4.4 Threading
 - `fuser` dispatches on one thread. `read` handlers hand the `ReplyData` (which
@@ -214,9 +216,9 @@ then mip levels back-to-back. BC1 level size = `max(1,w/4) * max(1,h/4) * 8`.
 | 2 | 1024 | 524,288 | ZL Z-2, 4×4 tiles |
 | 3 | 512 | 131,072 | ZL Z-3, 2×2 tiles |
 | 4 | 256 | 32,768 | ZL Z-4, 1 tile |
-| 5–12 | 128…1 | 11,064 total | downsampled from mip 4 |
+| 5–12 | 128…1 | 10,936 total | downsampled from mip 4 |
 
-Total file size: **11,184,952 bytes** (128 header + 11,184,824 data).
+Total file size: **11,184,952 bytes** (128 header + 11,184,824 data) — identical to Ortho4XP/nvcompress output, verified on the pilot tile.
 
 Mips 0–4 are built directly from the provider's own lower zoom levels instead
 of downsampling — fewer downloads for distant terrain and better source quality.
@@ -227,7 +229,7 @@ One 256-px source tile row = 64 block rows. For mip 0 that is 512 KiB per tile
 row. So a read `[off, off+len)` maps to: mip level(s) → band(s) of 64 block
 rows → the source tiles in that band. A band is the unit of work and caching.
 
-The header and mips ≥ 4 (~44 KB total, needs 1 tile at Z-4) are produced eagerly
+The header and mips ≥ 4 (~43.7 KB total, needs 1 tile at Z-4) are produced eagerly
 on first open of any texture.
 
 X-Plane at reduced texture quality never reads mip 0; that ZL is then simply
@@ -258,6 +260,15 @@ If the band's tiles aren't all available by the deadline:
 
 Degraded-band counts are a first-class metric in the UI.
 
+**Measured in X-Plane 12.4 (xof-bench, §19):** X-Plane reads each texture
+once per load and never re-reads it, so a band served degraded during the
+initial load stays degraded for the session (35 % of bands in one cold start
+at JFK); upgrades only help later loads. While X-Plane shows its loading
+screen there is no frame to protect, so the daemon detects the load (Web API
+silent, frames > 250 ms, or not connected) and uses
+`imagery.loading_deadline_ms` (20 s) instead of `deadline_ms` (1.2 s). In
+flight, scenery loads asynchronously: slow reads caused no stalls.
+
 ### 5.5 Dynamic zoom (M3)
 Above a configurable AGL threshold, mip 0 of a ZL Z texture is built from ZL
 Z-1 tiles (upscaled) instead of ZL Z — ~75% fewer downloads at cruise. Below
@@ -282,7 +293,8 @@ A single signed manifest describes all hosted tiles:
   "attribution": ["© OpenStreetMap contributors", "Copernicus DEM …"],
   "tiles": {
     "+40-074": {
-      "dsf":   { "object": "tiles/+40-080/+40-074.3f9a….dsf", "size": 41234567, "blake3": "…" },
+      "dsf":   { "object": "tiles/+40-080/+40-074.3f9a….dsf.zst", "size": 27305512,
+                 "stripped_size": 42987139, "blake3": "…" },   // no Laminar rasters
       "masks": [ { "name": "…png", "object": "masks/….png", "size": 12345, "blake3": "…" } ],
       "zl": { "base": 16, "airports": 17 }
     }
@@ -299,31 +311,72 @@ A single signed manifest describes all hosted tiles:
   config; after that the manifest's own `mirrors` list is used, tried in order
   with failover.
 
-### 6.2 Read path
-- DSF read, cached and hash-valid → serve.
-- Not cached → download the full object (from first healthy mirror), verify
-  BLAKE3, write to mesh cache, then serve. DSFs are 7z-compressed and served
-  byte-for-byte — X-Plane decompresses them itself.
-- **No degraded fallback**: mesh reads block. XP12 loads scenery on background
-  threads; prefetch (§9) keeps this rare.
-- Concurrent reads of the same DSF coalesce onto one download.
+### 6.2 Laminar raster splice
+X-Plane 12 DSFs carry raster layers alongside the mesh. Ortho4XP copies them
+from X-Plane's own Global Scenery DSF; for `+40-074` these are:
 
-### 6.3 Offline and failure behaviour
+| Layer | Size | Purpose |
+|---|---|---|
+| `elevation` | 1201×1201 int16 | terrain elevation raster |
+| `sea_level` | 1201×1201 int16 | water depth (bathymetry) |
+| `soundscape` | 1333×1333 u8 | ambient-sound land class |
+| `spr1`…`win2` (8) | 128×128 u8 each | XP12 seasonal parameters |
+
+These are Laminar's data, so **hosted DSFs never contain them**. Instead the
+daemon splices them in locally from the user's own installation:
+
+1. Locate the matching Global Scenery DSF
+   (`<X-Plane>/Global Scenery/X-Plane 12 Global Scenery/Earth nav data/…`).
+2. Decompress it (7z) and extract the `DEFN/DEMN` (raster names) and `DEMS`
+   (raster headers + data) atoms.
+3. Apply Ortho4XP's adjustment: `sea_level = min(sea_level, elevation - 2)`
+   (Laminar's inland bathymetry is partial).
+4. Rebuild our hosted DSF with those atoms: replace the empty `DEMN`, append
+   `DEMS`, fix atom lengths, recompute the trailing MD5.
+5. Write the result **uncompressed** to the mesh cache and serve it.
+
+This is atom-level surgery on two atoms (≈100 lines; no mesh decoding), unlike
+the rejected full re-texturing transform (§17).
+
+**File size:** `size = stripped_size (catalog) + raster_atoms_size (local)`.
+The local part comes from a small **raster index** keyed by tile and by the
+Global Scenery file's size + mtime. On a `lookup`/`getattr` for a tile not yet
+indexed, the daemon reads the local DSF (≈0.3–0.5 s, local disk, no network)
+and records it; tiles near the aircraft and in prefetch are indexed ahead of
+time in the background.
+
+**Fallbacks:** no Global Scenery DSF for the tile (partial scenery install,
+ocean tile, X-Plane not found) → serve the stripped DSF unchanged; X-Plane
+renders it without those rasters. An X-Plane update that changes a Global
+Scenery file invalidates its index entry and spliced cache file, rebuilt at the
+next simulator start (never under a running X-Plane, as in §6.5).
+
+### 6.3 Read path
+- DSF read, spliced file cached and valid → serve.
+- Not cached → download the full object (from first healthy mirror), verify
+  BLAKE3, decompress, splice (§6.2), write to mesh cache, then serve.
+- **No degraded fallback**: mesh reads block. XP12 loads scenery on background
+  threads; prefetch (§9) downloads *and splices* ahead, keeping this rare.
+- Concurrent reads of the same DSF coalesce onto one download/splice.
+
+### 6.4 Offline and failure behaviour
 - Origin unreachable at startup → only cached tiles are listed; uncovered
   areas fall back cleanly to X-Plane's default scenery.
 - Download failure mid-flight → `EIO`. X-Plane's handling of a failed or slow
   DSF read is measured in spike S4; if it's ugly, prefetch radius grows and
   uncached-tile listing becomes conservative.
 
-### 6.4 Updates
+### 6.5 Updates
 A tile whose hash changed in a new catalog version is downloaded in the
 background; the new file is swapped in only at the next simulator start
 (detected via Web API disconnect/reconnect or daemon restart), never under a
 running X-Plane.
 
-### 6.5 Mesh cache
+### 6.6 Mesh cache
 Plain files on disk (few, large), separate size cap and LRU from the imagery
-cache. Tiles around frequently used airports can be pinned.
+cache. Stores the downloaded zstd object and the spliced uncompressed DSF (the
+latter can be regenerated locally if evicted). Tiles around frequently used
+airports can be pinned.
 
 ---
 
@@ -392,14 +445,23 @@ live in T1 with a TTL.
 1. **Inputs:** OSM (water, coastline, airports — ODbL, attribution required)
    and Copernicus GLO-30 or SRTM elevation (clear licences; avoid sources
    with unclear terms).
-2. **Ortho4XP headless batch, mesh steps only** (no imagery downloaded at
-   build time). Config versioned in this repo for reproducibility:
-   - ZL16 base, **ZL17 within a few km of airports**;
+2. **Ortho4XP headless batch, mesh steps only** (`skip_downloads=True`, no
+   imagery at build time). Config versioned in this repo for reproducibility:
+   - ZL16 base, **ZL17 within 2 km of airports** (`cover_airports_with_highres`);
    - neutral provider code `XO`;
-   - water masks on.
-3. Runs on preemptible cloud VMs or the self-hosted server; minutes per tile.
-4. `xof-publish`: 7z-compress DSFs, compute BLAKE3, write content-addressed
-   objects, generate and sign the manifest, upload.
+   - water masks as external PNGs (`imprint_masks_to_dds=False`);
+   - elevation: USGS NED 1/3" in the US, Copernicus GLO-30 elsewhere (needs GDAL);
+   - **no Global Scenery path configured**, so no Laminar rasters are copied
+     into the DSF (§6.2).
+   - OSM from a **local Overpass instance** loaded from Geofabrik extracts —
+     public Overpass servers proved too slow/unreliable (pilot: 23 of 26 min
+     spent waiting on them).
+3. Runs on preemptible cloud VMs or the self-hosted server; ~3 min compute per
+   dense tile.
+4. `xof-publish`: **reject any DSF containing `DEMS` data** (guard against
+   accidentally publishing Laminar rasters, or strip them with `--strip-rasters`),
+   zstd-compress DSFs (level 19), compute BLAKE3,
+   write content-addressed objects, generate and sign the manifest, upload.
 5. Automated checks per tile: DSF parses, expected terrain names, size sanity;
    a sample loaded in X-Plane for each release.
 
@@ -413,7 +475,7 @@ Any static HTTPS server satisfying:
 ```
 /v1/manifest.json.zst
 /v1/manifest.json.zst.sig
-/v1/tiles/+40-080/+40-074.<blake3-prefix>.dsf
+/v1/tiles/+40-080/+40-074.<blake3-prefix>.dsf.zst
 /v1/masks/<name>.<blake3-prefix>.png
 ```
 
@@ -445,7 +507,7 @@ Global storage estimate (few hundred GB – ~1 TB) is confirmed by the pilot.
 | Concern | Handling |
 |---|---|
 | Filesystem driver | Windows: WinFsp MSI bundled, silent install. Linux: system libfuse3. macOS: macFUSE — the one manual step, detected and linked by the UI |
-| X-Plane location | Read `x-plane_install_12.txt` from X-Plane's per-user preferences location on each OS; ask only if absent or ambiguous |
+| X-Plane location | Read `x-plane_install_12.txt` from X-Plane's per-user preferences location on each OS. It can list stale paths (seen on the dev machine), so validate each entry (`X-Plane.exe`/app + `Global Scenery` present); ask only if none or several are valid |
 | `scenery_packs.ini` | Entry added automatically on first run, with backup |
 | Defender | Installer checkbox (see §4.5) |
 | Imagery provider | Esri by default after a one-time notice |
@@ -538,6 +600,11 @@ screen.
 - **S5** — Pilot mesh build: Ortho4XP headless, NYC 3×3, our config. Measures
   build time and size per tile → global hosting estimate. Its output also
   feeds M1.
+- **S6** — Raster splice. ✅ Done: Python prototype of §6.2 on `+40-074`
+  produced output **byte-identical** to Ortho4XP's own Global-Scenery-enabled
+  build (0.65 s incl. 7z decompression). In-sim comparison of the stripped
+  fallback skipped: it only occurs when a user lacks the Global Scenery file,
+  which is rare.
 
 ### Milestones
 - **M1 — Headless Windows textures:** `xof-cli mount` the S5 NYC pack as an
@@ -573,7 +640,9 @@ screen.
 | X-Plane handles slow/failed DSF reads badly | S4; aggressive mesh prefetch; prepare departure; conservative listing when offline |
 | We operate a mesh service (build + hosting) | Static immutable files only, no servers to run; two interchangeable origin setups; small predictable cost |
 | Ortho4XP batch quality/failures at scale | Pilot (S5) first; automated per-tile checks; versioned config |
-| Data licences (OSM ODbL, DEM) | OSM + Copernicus/SRTM only; attribution in app |
+| Data licences (OSM ODbL, DEM) | OSM + NED/Copernicus only; attribution in app |
+| Redistributing Laminar data | Hosted DSFs never contain Global Scenery rasters; spliced locally from the user's own install (§6.2); publish-time guard |
+| Splice depends on Global Scenery layout/format | Fallback to stripped DSF; index keyed on file size+mtime; covered by tests against a real XP12 install |
 | WinFsp licence: GPLv3 with a FLOSS exception; closed-source distribution needs a commercial licence | Decided: xporthofs is MIT-licensed (satisfies the OSD, so the exception applies). Exception conditions we must keep — see §11.1 |
 | Provider blocks / rate limits / ToS | Per-provider rate limits, one-time notice, multiple providers |
 | X-Plane read patterns differ from assumptions | Instrument reads in M1; band design still works, only budgets change |
@@ -593,3 +662,73 @@ screen.
 - **Reusing AutoOrtho's published meshes** — external dependency, unverified
   redistribution terms, packaged as large region archives.
 - **ProjFS / Cloud Files API, Dokan, NFS** for Windows — see §4.1.
+
+---
+
+## 18. Implementation status (2026-11-15)
+
+All milestones M1–M5 are implemented on branch `impl`; spike results are in
+[`findings-s3-s5.md`](findings-s3-s5.md).
+
+| Area | Status | Verified |
+|---|---|---|
+| `xof-core` (tile math, names, DDS, BC1, providers, T1/T2 caches, engine with deadlines, fallback, upgrades, dynamic zoom) | done | unit + mock-server tests; live Esri texture matches Ortho4XP at 33 dB |
+| `xof-mesh` (DSF splice/strip, signed catalog, streamer, raster index, offline, deferred updates) | done | byte-identical to Ortho4XP on `+40-074`; mock-origin tests |
+| `xof-vfs` WinFsp backend | done | end-to-end mount test on Windows |
+| `xof-vfs` FUSE backend (Linux, macOS/macFUSE) | done | compiles and unit-tests on Linux (WSL); mount test needs `fusermount3`; macOS untested |
+| `xof-daemon` (IPC, X-Plane detection, `scenery_packs.ini`, Web API, prefetch, health, housekeeping, autostart) | done | daemon + CLI exercised against a local signed NYC catalog |
+| `xof-cli` | done | |
+| `xof-publish` (keygen, build, upload dir/S3, verify) | done | NYC pilot published and streamed |
+| `xof-ui` (Tauri) | done | launches; pages checked in a browser with a mocked bridge |
+| Installer (NSIS hooks: WinFsp MSI, Defender prompt), CI, cargo-deny | done | not yet run on CI / not yet built into an installer |
+
+### Deviations from the text above
+
+- **Hosted DSFs are zstd, not 7z** (§6.1, §10): the daemon always decompresses
+  to splice, so X-Plane's native 7z support no longer matters; zstd is ~10 %
+  larger but much faster to decode.
+- **Start at login on Windows** uses the per-user `Run` key instead of Task
+  Scheduler (no admin rights needed).
+- **BC1 "high quality" background encoding** (§5.3) uses the same ISPC encoder
+  as live reads: ISPC's BC1 has a single quality mode and is already within
+  ~1 dB of nvcompress. A slower encoder can be slotted into `bc1::encode` later.
+- **Imagery prefetch** warms zooms ZL-4…ZL-1 in a corridor; full ZL textures
+  are built on demand only.
+- **Default mesh origin/key**: `config::DEFAULT_MESH_MIRRORS` points at a
+  placeholder domain and `DEFAULT_MESH_KEYS` is empty until a real catalog is
+  hosted; until then users add the origin and key in config.
+
+### Open items
+
+- Run the macOS (macFUSE FSKit mode) and Linux FUSE mounts on real machines.
+- ~~Fly the NYC pilot in X-Plane 12~~: replaced by automated in-sim runs (§19).
+- Cold start (see §19): deferred ideas, cheaper handling of X-Plane's 64 KiB
+  probe and a pre-warm targeted at what X-Plane reads.
+- Local Overpass for the build pipeline; skip all-ocean tiles automatically.
+- Host the catalog (R2 and/or self-hosted) and embed the release key.
+- Build signed installers (`scripts/stage-release.ps1`, `cargo tauri build`).
+
+
+---
+
+## 19. In-sim results (xof-bench, 2026-11-15)
+
+`xof-bench` ([`bench.md`](bench.md)) drives X-Plane 12.4.4 through the Web
+API: flight start, frozen aircraft, nadir camera, closed-loop slew between
+spots, timed screenshots scored against a reference variant (aligned SSIM),
+frame stalls, and daemon counters. NYC pilot, other Custom Scenery disabled.
+
+| Finding | Numbers |
+|---|---|
+| Streaming works in X-Plane: meshes, masks, textures in place | similarity to the Ortho4XP pack 0.91–0.99 at land spots (default scenery 0.12–0.78) |
+| Remaining gap to the reference is the BC1 encoder, not blur | xof crisper/blockier than nvcompress; gap identical with 0 degraded bands |
+| In-flight streaming costs nothing measurable | 186 km leg at 450 kt: 1 stall > 100 ms for default and xof alike; xof 72 fps vs 61 |
+| Prefetch keeps flight quality at full | 2 degraded bands out of 10 379 reads |
+| Cold start at JFK (empty caches) | ~90 s (90–140 s with Esri latency) vs 35 s for the static pack; 50 s with a warm imagery cache |
+| X-Plane read pattern (trace) | 1657 textures touched at a JFK start; each opens with a 64 KiB read at offset 0; 1391 then read at mip 3 only |
+| No gain | fetch concurrency 16→64; mip-aware read-ahead (+44 % bands, 110 s; off by default); 40 km full-texture pre-warm |
+
+Other changes driven by the bench: catalog client prefers the last good
+mirror; loading-phase read budget (§5.4); phase-dependent fetch concurrency
+(`imagery.max_requests` 32 / `loading_max_requests` 64); DSF-aware pre-warm
+(prepare departure, X-Plane's `last.pos`).

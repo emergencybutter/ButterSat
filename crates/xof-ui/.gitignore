@@ -1,0 +1,4 @@
+binaries/
+installer/winfsp.msi
+gen/
+tauri.release.unix.conf.json

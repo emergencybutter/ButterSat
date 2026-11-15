@@ -1,0 +1,28 @@
+[package]
+name = "xof-core"
+description = "Tile math, DDS synthesis, imagery providers and caches for xporthofs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+parking_lot.workspace = true
+rayon.workspace = true
+redb.workspace = true
+lru.workspace = true
+image.workspace = true
+intel_tex_2.workspace = true
+futures.workspace = true
+rand.workspace = true
+bytes = "1"
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
