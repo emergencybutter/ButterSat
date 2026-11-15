@@ -9,8 +9,9 @@ use std::time::Duration;
 
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::Mutex;
-use xof_proto::Client;
+use xof_proto::{method, Client, Status};
 
 #[derive(Default)]
 struct Conn(Mutex<Option<Client>>);
@@ -112,12 +113,60 @@ fn about() -> Value {
     })
 }
 
+/// Check the update feed (`https://satsrv.butr.cc/updates/latest.json`).
+#[tauri::command]
+async fn update_check(app: AppHandle) -> Result<Value, String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    match updater.check().await.map_err(|e| e.to_string())? {
+        Some(u) => Ok(serde_json::json!({
+            "available": true,
+            "current_version": u.current_version,
+            "version": u.version,
+            "body": u.body,
+        })),
+        None => Ok(serde_json::json!({
+            "available": false,
+            "current_version": env!("CARGO_PKG_VERSION"),
+        })),
+    }
+}
+
+/// Download and install a pending update. Refuses while X-Plane is connected so
+/// an active flight is never interrupted.
+#[tauri::command]
+async fn update_install(app: AppHandle, conn: State<'_, Conn>) -> Result<Value, String> {
+    if let Ok(client) = ensure(&app, &conn).await {
+        if let Ok(st) = client.call::<_, Status>(method::STATUS, Value::Null).await {
+            if st.sim_connected {
+                return Err("Close X-Plane before installing an update so your flight is not interrupted.".into());
+            }
+        }
+    }
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+        return Ok(serde_json::json!({ "installed": false, "message": "Already up to date." }));
+    };
+    let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    if let Ok(client) = ensure(&app, &conn).await {
+        if let Ok(st) = client.call::<_, Status>(method::STATUS, Value::Null).await {
+            if st.sim_connected {
+                return Err("Close X-Plane before installing an update so your flight is not interrupted.".into());
+            }
+        }
+        let _ = client.call::<_, Value>(method::SHUTDOWN, Value::Null).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    update.install(&bytes).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "installed": true, "version": update.version }))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Conn::default())
-        .invoke_handler(tauri::generate_handler![rpc, about])
+        .invoke_handler(tauri::generate_handler![rpc, about, update_check, update_install])
         .run(tauri::generate_context!())
         .expect("error while running ButterSat");
 }

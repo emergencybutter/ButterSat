@@ -31,6 +31,10 @@
 
   <main>
     <section id="overview" class="view active">
+      <div id="update-banner" class="banner update hidden">
+        <span id="update-text"></span>
+        <button type="button" id="btn-update" class="primary">Install update</button>
+      </div>
       <div id="banner" class="banner hidden"></div>
       <div class="card activity">
         <h3>Activity <span class="muted">· last 30 min</span></h3>
@@ -201,6 +205,10 @@
       <div class="card">
         <h3>ButterSat <span id="about-version"></span></h3>
         <p>Streamed orthophoto scenery for X-Plane 12. Open source under the MIT licence.</p>
+        <div class="row">
+          <button type="button" id="btn-check-update">Check for updates</button>
+          <span id="about-update" class="result"></span>
+        </div>
         <ul id="notices" class="list small"></ul>
       </div>
     </section>

@@ -4,7 +4,7 @@
 param(
   [string]$WinFspVersion = "2.1.25156",
   [string]$WinFspRelease = "v2.1",
-  [string]$WinFspSha256 = ""   # pin after the first verified download
+  [string]$WinFspSha256 = "073A70E00F77423E34BED98B86E600DEF93393BA5822204FAC57A29324DB9F7A"
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent

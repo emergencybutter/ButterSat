@@ -152,6 +152,39 @@ pub fn ensure_scenery_pack(xp: &Path) -> anyhow::Result<bool> {
     Ok(true)
 }
 
+/// Remove our pack line from `scenery_packs.ini` text. Returns `None` when not
+/// present.
+pub fn remove_pack_entry(ini: &str) -> Option<String> {
+    remove_named_pack_entry(ini, PACK_NAME)
+}
+
+/// [`remove_pack_entry`] for any folder of `Custom Scenery`.
+pub fn remove_named_pack_entry(ini: &str, pack: &str) -> Option<String> {
+    let is_ours = |l: &str| pack_line_name(l).is_some_and(|n| n.eq_ignore_ascii_case(pack));
+    if !ini.lines().any(is_ours) {
+        return None;
+    }
+    let out: Vec<&str> = ini.lines().filter(|l| !is_ours(l)).collect();
+    Some(out.join("\n") + "\n")
+}
+
+/// Remove our pack line from the install's `scenery_packs.ini` (with a
+/// timestamped backup) and remove an empty `Custom Scenery/z_buttersat` folder
+/// if left behind.
+pub fn remove_scenery_pack(xp: &Path) -> anyhow::Result<bool> {
+    let mp = default_mount_point(xp);
+    let _ = std::fs::remove_dir(&mp);
+    let ini = xp.join("Custom Scenery").join("scenery_packs.ini");
+    let Ok(text) = std::fs::read_to_string(&ini) else { return Ok(false) };
+    let Some(new) = remove_pack_entry(&text) else { return Ok(false) };
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    std::fs::copy(&ini, ini.with_file_name(format!("scenery_packs.ini.buttersat-{stamp}.bak")))?;
+    let tmp = ini.with_extension("ini.tmp");
+    std::fs::write(&tmp, new)?;
+    std::fs::rename(tmp, &ini)?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,5 +228,15 @@ mod tests {
         let l = parse_install_list("C:\\X-Plane 12/\nC:\\Program Files (x86)/Steam/steamapps/common/X-Plane 12/\n\n");
         assert_eq!(l.len(), 2);
         assert!(!is_valid_install(&l[0]) || l[0].exists());
+    }
+
+    #[test]
+    fn removes_pack_entry_and_is_idempotent() {
+        let inserted = insert_pack_entry(INI).unwrap();
+        assert!(inserted.contains(PACK_NAME));
+        let removed = remove_pack_entry(&inserted).unwrap();
+        assert!(!removed.contains(PACK_NAME));
+        assert_eq!(removed, INI);
+        assert!(remove_pack_entry(&removed).is_none());
     }
 }
