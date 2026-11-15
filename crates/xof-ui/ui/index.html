@@ -232,6 +232,27 @@
     </section>
   </main>
 
+  <div id="first-run" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="fr-title">
+    <div class="modal-card">
+      <h2 id="fr-title">Choose your imagery</h2>
+      <p class="muted">ButterSat builds X-Plane's ground textures from aerial imagery. You can change this later in Settings.</p>
+      <button type="button" class="choice" id="fr-open">
+        <strong>Open imagery (free)</strong>
+        <span>Government aerial photos where they exist: USGS in the United States (up to zoom 16, softer around airports), and France, Switzerland, the Netherlands, Spain and Austria. Elsewhere X-Plane's own scenery stays in place.</span>
+      </button>
+      <button type="button" class="choice" id="fr-esri">
+        <strong>Esri World Imagery (sharper, worldwide)</strong>
+        <span>Higher resolution almost everywhere, including ZL17 around airports. Esri's terms of use apply to this imagery.</span>
+      </button>
+      <label class="check fr-accept hidden" id="fr-accept-row"><input type="checkbox" id="fr-accept">
+        I have read <a href="#" id="fr-terms">Esri's terms of use</a> and use the imagery for personal flight simulation only.</label>
+      <div class="row end">
+        <span id="fr-result" class="result"></span>
+        <button type="button" class="primary hidden" id="fr-confirm">Use Esri imagery</button>
+      </div>
+    </div>
+  </div>
+
   <script src="vendor/maplibre-gl-5.24.0/maplibre-gl.js"></script>
   <script src="app.js"></script>
 </body>

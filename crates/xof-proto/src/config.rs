@@ -83,6 +83,9 @@ pub struct ImageryConfig {
     /// The user explicitly acknowledged the commercial provider's (Esri/Bing) terms notice.
     /// Until true, the daemon never fetches from non-open providers.
     pub provider_notice_accepted: bool,
+    /// The user picked an imagery source in the first-launch dialog (until
+    /// then the app asks; the daemon behaves as for open imagery).
+    pub source_chosen: bool,
     /// Live-read budget in flight.
     pub deadline_ms: u64,
     /// Budget while X-Plane is loading (loading screen: nothing to stall,
@@ -105,6 +108,7 @@ impl Default for ImageryConfig {
             provider: "esri".into(),
             prefer_open: true,
             provider_notice_accepted: false,
+            source_chosen: false,
             deadline_ms: 1200,
             loading_deadline_ms: 20_000,
             max_requests: 32,

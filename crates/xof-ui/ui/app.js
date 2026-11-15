@@ -594,6 +594,66 @@ $("st-move").addEventListener("click", () => relocate("move"));
 $("st-fresh").addEventListener("click", () => relocate("fresh"));
 $("st-cancel").addEventListener("click", () => $("st-confirm").classList.add("hidden"));
 
+// ---------------------------------------------------------------- first launch: imagery choice
+const ESRI_TERMS = "https://www.esri.com/en-us/legal/terms/full-master-agreement";
+
+async function saveImageryChoice(patch) {
+  const c = await rpc("get_config");
+  Object.assign(c.imagery, patch, { source_chosen: true });
+  await rpc("set_config", c);
+  config = c;
+}
+
+async function firstRun() {
+  let c;
+  try {
+    c = await rpc("get_config");
+  } catch (_) {
+    return setTimeout(firstRun, 2000); // daemon still starting
+  }
+  if (c.imagery && c.imagery.source_chosen) return;
+  const modal = $("first-run");
+  const out = $("fr-result");
+  modal.classList.remove("hidden");
+  const done = () => {
+    modal.classList.add("hidden");
+    if (location.hash === "#settings") loadSettings();
+    refresh();
+  };
+  $("fr-open").onclick = async () => {
+    try {
+      await saveImageryChoice({ provider: "open", prefer_open: true, provider_notice_accepted: false });
+      done();
+    } catch (e) {
+      out.className = "result err";
+      out.textContent = String(e);
+    }
+  };
+  $("fr-esri").onclick = () => {
+    $("fr-esri").classList.add("selected");
+    $("fr-accept-row").classList.remove("hidden");
+    $("fr-confirm").classList.remove("hidden");
+    $("fr-confirm").disabled = !$("fr-accept").checked;
+  };
+  $("fr-accept").onchange = () => ($("fr-confirm").disabled = !$("fr-accept").checked);
+  $("fr-terms").onclick = (ev) => {
+    ev.preventDefault();
+    try {
+      T.opener.openUrl(ESRI_TERMS);
+    } catch (_) {}
+  };
+  $("fr-confirm").onclick = async () => {
+    if (!$("fr-accept").checked) return;
+    try {
+      await saveImageryChoice({ provider: "esri", prefer_open: false, provider_notice_accepted: true });
+      done();
+    } catch (e) {
+      out.className = "result err";
+      out.textContent = String(e);
+    }
+  };
+}
+
 // ---------------------------------------------------------------- about
 async function loadAbout() {
   const a = await T.core.invoke("about");
@@ -659,5 +719,6 @@ T.event.listen("daemon-disconnected", () => {
 
 show(location.hash.slice(1) || "overview");
 refresh();
+firstRun();
 checkUpdates(false);
 setInterval(refreshMapData, 30000);
