@@ -173,7 +173,7 @@ async fn slow_tiles_degrade_then_upgrade() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn read_ahead_starts_on_first_data_read_not_on_open() {
+async fn read_ahead_follows_the_mip_being_read() {
     let (base, hits) = serve(255, Duration::ZERO).await;
     let dir = tempfile::tempdir().unwrap();
     let store = TileStore::open(&dir.path().join("tiles.redb")).unwrap();
@@ -183,14 +183,18 @@ async fn read_ahead_starts_on_first_data_read_not_on_open() {
         store,
     )
     .unwrap();
-    // Open + header peek (X-Plane's scenery scan): only the tail tile.
+    // Open + X-Plane's 64 KiB probe: the tail and mip 0 band 0 only.
     e.on_open(&tex(), ReaderClass::XPlane);
-    e.read(&tex(), 0, 128, e.live_ctx()).await.unwrap();
+    e.read(&tex(), 0, 65_536, e.live_ctx()).await.unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(hits.load(Ordering::Relaxed), 1);
-    // First data read: the whole texture is built in the background.
-    let m0 = Segment::Band { mip: 0, band: 0 };
-    e.read(&tex(), m0.offset(), 16, e.live_ctx()).await.unwrap();
+    assert_eq!(hits.load(Ordering::Relaxed), 1 + 16);
+    // A distant texture: mip 3 only -> mip 3's two bands, nothing larger.
+    let m3 = Segment::Band { mip: 3, band: 0 };
+    e.read(&tex(), m3.offset(), 16, e.live_ctx()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(hits.load(Ordering::Relaxed), 1 + 16 + 4);
+    // Read past the probe in mip 0: everything is built in the background.
+    e.read(&tex(), 65_536, 65_536, e.live_ctx()).await.unwrap();
     for _ in 0..100 {
         if hits.load(Ordering::Relaxed) >= 341 {
             break;
@@ -199,7 +203,7 @@ async fn read_ahead_starts_on_first_data_read_not_on_open() {
     }
     assert_eq!(hits.load(Ordering::Relaxed), 341);
     // Later reads are served from RAM.
-    let last = Segment::Band { mip: 3, band: 1 };
+    let last = Segment::Band { mip: 2, band: 3 };
     e.read(&tex(), last.offset(), last.len(), e.live_ctx()).await.unwrap();
     assert_eq!(hits.load(Ordering::Relaxed), 341);
 }

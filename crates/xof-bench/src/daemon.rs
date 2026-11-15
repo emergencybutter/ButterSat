@@ -78,6 +78,7 @@ impl Daemon {
         let child = Command::new(exe)
             .env("XOF_HOME", home)
             .env("RUST_LOG", "info")
+            .env("XOF_READ_TRACE", home.join("reads.trace"))
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)

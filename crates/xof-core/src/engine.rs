@@ -113,6 +113,27 @@ pub struct EngineStatsSnapshot {
     pub fetch_limit: u64,
 }
 
+/// X-Plane's first read of every texture: header + start of mip 0.
+const PROBE_LEN: u64 = 65_536;
+
+/// Debug: with `XOF_READ_TRACE=<file>`, append `ms texture offset len class`
+/// for every read (X-Plane's access pattern drives read-ahead decisions).
+fn trace_read(tex: &TextureId, off: u64, len: u64, class: ReaderClass) {
+    use std::io::Write;
+    use std::sync::OnceLock;
+    static TRACE: OnceLock<Option<(Instant, Mutex<std::io::BufWriter<std::fs::File>>)>> = OnceLock::new();
+    let t = TRACE.get_or_init(|| {
+        let path = std::env::var_os("XOF_READ_TRACE")?;
+        let f = std::fs::File::create(path).ok()?;
+        Some((Instant::now(), Mutex::new(std::io::BufWriter::new(f))))
+    });
+    if let Some((t0, w)) = t {
+        let mut w = w.lock();
+        let _ = writeln!(w, "{} {} {off} {len} {class:?}", t0.elapsed().as_millis(), tex.stem());
+        let _ = w.flush();
+    }
+}
+
 const LATENCY_BOUNDS: [u64; 6] = [10, 50, 200, 1000, 3000, u64::MAX];
 
 enum TileState {
@@ -131,7 +152,7 @@ struct Inner {
     upgrading: Mutex<HashSet<SegKey>>,
     reduced_zoom: AtomicBool,
     /// Textures already read ahead (cleared when large).
-    read_ahead_done: Mutex<HashSet<TextureId>>,
+    read_ahead_done: Mutex<HashSet<(TextureId, u8)>>,
     /// Live-read budget; starts at `cfg.deadline_ms`, set by the daemon per sim phase.
     live_deadline_ms: AtomicU64,
     stats: EngineStats,
@@ -224,17 +245,29 @@ impl TextureEngine {
         let pieces = dds::pieces(off, len);
         let mut unique: Vec<Segment> = pieces.iter().map(|p| p.segment).collect();
         unique.dedup();
-        if ctx.class == ReaderClass::XPlane
-            && self.inner.cfg.read_ahead
-            && unique.iter().any(|s| matches!(s, Segment::Band { .. }))
-        {
-            self.read_ahead(tex, ctx);
+        if ctx.class == ReaderClass::XPlane && self.inner.cfg.read_ahead {
+            // X-Plane opens every texture with a 64 KiB probe at offset 0
+            // (header + start of mip 0), then reads only the mips it wants
+            // (distant textures: mips 3+). Read ahead on reads past the probe,
+            // for the mip being read and the smaller ones.
+            let mip = pieces
+                .iter()
+                .filter(|p| off + p.out_off >= PROBE_LEN)
+                .filter_map(|p| match p.segment {
+                    Segment::Band { mip, .. } => Some(mip),
+                    _ => None,
+                })
+                .min();
+            if let Some(m) = mip {
+                self.read_ahead(tex, m, ctx);
+            }
         }
         let bufs = futures::future::join_all(unique.iter().map(|s| self.segment(tex, *s, ctx))).await;
         let mut map = HashMap::new();
         for (s, b) in unique.iter().zip(bufs) {
             map.insert(*s, b?);
         }
+        trace_read(tex, off, len, ctx.class);
         let total: u64 = pieces.iter().map(|p| p.len).sum();
         let mut out = vec![0u8; total as usize];
         for p in &pieces {
@@ -264,23 +297,23 @@ impl TextureEngine {
         }
     }
 
-    /// Read-ahead: build every band of `tex` in parallel, once. Triggered by
-    /// the first read that touches image data, not by open: X-Plane's
-    /// startup scan opens every texture to peek at its header, and building
-    /// them all then stalls the scan (seen in xof-bench).
-    fn read_ahead(&self, tex: &TextureId, ctx: ReadCtx) {
+    /// Read-ahead: build every band of mip `from_mip` and smaller, in
+    /// parallel, once per (texture, mip). Measured X-Plane access pattern
+    /// (bench/nyc-trace): of 1657 textures touched loading at JFK, 1391 were
+    /// read at mip 3 only; reading ahead whole textures flooded the load.
+    fn read_ahead(&self, tex: &TextureId, from_mip: u8, ctx: ReadCtx) {
         {
             let mut done = self.inner.read_ahead_done.lock();
-            if done.len() > 4096 {
+            if done.len() > 8192 {
                 done.clear();
             }
-            if !done.insert(tex.clone()) {
+            if !done.insert((tex.clone(), from_mip)) {
                 return;
             }
         }
         let mut segs: Vec<Segment> = dds::pieces(0, dds::FILE_LEN).iter().map(|p| p.segment).collect();
         segs.dedup();
-        for seg in segs.into_iter().filter(|s| matches!(s, Segment::Band { .. })) {
+        for seg in segs.into_iter().filter(|s| matches!(s, Segment::Band { mip, .. } if *mip >= from_mip)) {
             let this = self.clone();
             let tex = tex.clone();
             tokio::spawn(async move {
