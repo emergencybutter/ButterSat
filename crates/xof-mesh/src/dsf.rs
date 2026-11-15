@@ -295,8 +295,7 @@ pub fn read_dsf_file(path: &Path) -> Result<Vec<u8>, DsfError> {
 
 /// Decompress the single entry of a 7z archive held in memory.
 pub fn un7z_single(data: &[u8]) -> Result<Vec<u8>, DsfError> {
-    let len = data.len() as u64;
-    let mut reader = sevenz_rust::SevenZReader::new(std::io::Cursor::new(data), len, sevenz_rust::Password::empty())
+    let mut reader = sevenz_rust2::ArchiveReader::new(std::io::Cursor::new(data), sevenz_rust2::Password::empty())
         .map_err(|e| DsfError::SevenZ(e.to_string()))?;
     let mut out = None;
     reader

@@ -42,11 +42,11 @@ zstd = "0.13"
 clap = { version = "4", features = ["derive"] }
 dirs = "5"
 redb = "2"
-lru = "0.12"
+lru = "0.19"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 intel_tex_2 = "0.4"
 md-5 = "0.10"
-sevenz-rust = "0.6"
+sevenz-rust2 = { version = "0.25", default-features = false }
 futures = "0.3"
 hex = "0.4"
 rand = "0.8"

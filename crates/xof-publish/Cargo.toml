@@ -17,4 +17,4 @@ hex.workspace = true
 rand.workspace = true
 zstd.workspace = true
 blake3.workspace = true
-rusty-s3 = "0.7"
+rusty-s3 = "0.11"

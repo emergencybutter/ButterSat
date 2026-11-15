@@ -23,10 +23,10 @@ windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Thre
 libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-fuser = { version = "0.15", default-features = false }
+fuser = { version = "0.16", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-fuser = { version = "0.15" }
+fuser = { version = "0.16" }
 
 [dev-dependencies]
 tempfile.workspace = true

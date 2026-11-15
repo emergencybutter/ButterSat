@@ -35,7 +35,11 @@ jobs:
 
       - name: macOS deps (macFUSE headers for fuser)
         if: runner.os == 'macOS'
-        run: brew install --cask macfuse
+        run: |
+          brew install --cask macfuse
+          # The macFUSE system extension needs interactive approval: the
+          # mount test can't mount on hosted runners, so it may skip.
+          echo "XOF_MOUNT_TEST_OPTIONAL=1" >> "$GITHUB_ENV"
 
       - name: Test library crates and tools
         run: cargo test --workspace --exclude xof-ui

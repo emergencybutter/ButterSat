@@ -172,7 +172,16 @@ fn mount_and_read_through_os() {
         rt.handle().clone(),
     );
     let mnt = work.path().join("mnt");
-    let mounted = xof_vfs::mount(scenery, &mnt).expect("mount");
+    let mounted = match xof_vfs::mount(scenery, &mnt) {
+        Ok(m) => m,
+        // CI runners where the driver is installed but can't be loaded
+        // (macFUSE needs interactive approval).
+        Err(e) if std::env::var_os("XOF_MOUNT_TEST_OPTIONAL").is_some() => {
+            eprintln!("skipped: mount failed: {e:#}");
+            return;
+        }
+        Err(e) => panic!("mount: {e:#}"),
+    };
 
     // Root listing.
     let mut names: Vec<String> =
