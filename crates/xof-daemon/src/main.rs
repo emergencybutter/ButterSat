@@ -3,6 +3,7 @@
 
 mod airports;
 mod app;
+mod autostart;
 mod ipc;
 mod prefetch;
 mod webapi;

@@ -24,6 +24,7 @@ pub struct DaemonConfig {
     pub prefetch: PrefetchConfig,
     pub packs: PacksConfig,
     pub simbrief: SimbriefConfig,
+    pub startup: StartupConfig,
 }
 
 impl Default for DaemonConfig {
@@ -36,6 +37,7 @@ impl Default for DaemonConfig {
             prefetch: PrefetchConfig::default(),
             packs: PacksConfig::default(),
             simbrief: SimbriefConfig::default(),
+            startup: StartupConfig::default(),
         }
     }
 }
@@ -158,6 +160,13 @@ pub struct PacksConfig {
 pub struct SimbriefConfig {
     /// SimBrief username or pilot ID for route prefetch.
     pub user: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct StartupConfig {
+    /// Start the daemon when the user logs in.
+    pub start_at_login: bool,
 }
 
 /// Standard per-user locations.

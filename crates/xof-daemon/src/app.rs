@@ -490,6 +490,11 @@ impl App {
             method::SET_CONFIG => {
                 let new: DaemonConfig = serde_json::from_value(params).map_err(bad)?;
                 new.save(&self.config_path).map_err(internal)?;
+                if new.startup.start_at_login != self.cfg.lock().startup.start_at_login {
+                    if let Err(e) = crate::autostart::apply(new.startup.start_at_login) {
+                        tracing::warn!("start at login: {e:#}");
+                    }
+                }
                 let sim_running = *self.web.connected.borrow();
                 *self.cfg.lock() = new;
                 if sim_running && self.is_mounted() {
