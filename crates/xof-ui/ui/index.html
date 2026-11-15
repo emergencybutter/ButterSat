@@ -126,6 +126,23 @@
 
     <section id="settings" class="view">
       <form id="f-settings" class="card settings">
+        <h3>Storage</h3>
+        <dl>
+          <dt>Cache folder</dt><dd id="st-path" class="mono">–</dd>
+          <dt>In use</dt><dd id="st-usage">–</dd>
+          <dt>Free on that drive</dt><dd id="st-free">–</dd>
+        </dl>
+        <div class="row"><button type="button" id="btn-storage">Change folder…</button><span id="st-msg" class="result"></span></div>
+        <div id="st-confirm" class="hidden">
+          <p id="st-confirm-text"></p>
+          <div class="row">
+            <button type="button" class="primary" id="st-move">Move the cache there</button>
+            <button type="button" id="st-fresh">Start empty there</button>
+            <button type="button" id="st-cancel">Cancel</button>
+          </div>
+        </div>
+        <progress id="st-progress" class="hidden" max="100" value="0"></progress>
+
         <h3>Imagery</h3>
         <label>Provider
           <select name="imagery.provider"><option value="esri">Esri World Imagery</option><option value="bing">Bing Maps Aerial</option></select>

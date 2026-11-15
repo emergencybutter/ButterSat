@@ -54,6 +54,7 @@ xof-cli health            # what's wrong and how to fix it
 xof-cli prepare KJFK      # warm meshes + imagery around an airport
 xof-cli route             # prefetch along your SimBrief plan
 xof-cli set imagery.provider bing
+xof-cli cache-move D:\ButterSat   # move the caches to another drive (or Settings → Storage)
 xof-cli run --pack path/to/zOrtho4XP_+40-074 --mount X:/mnt   # standalone test mount
 ```
 

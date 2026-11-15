@@ -350,6 +350,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn store_closes_and_reopens_elsewhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a/t.redb"), dir.path().join("b/t.redb"));
+        let s = TileStore::open(&a).unwrap();
+        let t = TileCoord::new(16, 100, 200);
+        s.put("esri", t, &Fetched::Data(Bytes::from_static(b"jpeg"))).unwrap();
+        s.close().unwrap();
+        assert!(s.get("esri", t).is_err(), "closed store refuses access");
+        std::fs::create_dir_all(b.parent().unwrap()).unwrap();
+        std::fs::rename(&a, &b).unwrap();
+        s.reopen(&b).unwrap();
+        assert_eq!(s.path(), b);
+        assert!(matches!(s.get("esri", t).unwrap(), Some(Fetched::Data(d)) if &d[..] == b"jpeg"));
+    }
+
+    #[test]
     fn store_roundtrip_and_evict() {
         let dir = tempfile::tempdir().unwrap();
         let s = TileStore::open(&dir.path().join("t.redb")).unwrap();

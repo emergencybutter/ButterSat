@@ -6,6 +6,7 @@ mod app;
 mod autostart;
 mod ipc;
 mod prefetch;
+mod storage;
 mod webapi;
 mod xplane;
 

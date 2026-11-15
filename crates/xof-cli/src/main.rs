@@ -34,8 +34,16 @@ enum Cmd {
     Config,
     /// Set a configuration value, e.g. `imagery.provider bing`.
     Set { key: String, value: String },
-    /// Cache usage.
+    /// Cache usage and location.
     Cache,
+    /// Move the caches to another folder or drive (X-Plane must be closed).
+    CacheMove {
+        path: String,
+        /// Start empty there instead of moving the current cache (the old
+        /// folder is left in place).
+        #[arg(long)]
+        fresh: bool,
+    },
     /// Refresh the mesh catalog.
     CatalogRefresh,
     /// Prefetch meshes and imagery around an airport (ICAO) before flying.
@@ -248,6 +256,42 @@ async fn main() -> anyhow::Result<()> {
                 s.areas.len()
             );
             println!("mesh:    {} MB / {} GB", s.mesh_bytes >> 20, s.mesh_cap_bytes >> 30);
+            let st: Status = c.call(method::STATUS, Value::Null).await?;
+            println!("folder:  {} ({:.1} GB free)", st.storage.cache_path, st.storage.available_bytes as f64 / 1e9);
+        }
+        Cmd::CacheMove { path, fresh } => {
+            let info: xof_proto::StorageInfo =
+                c.call(method::STORAGE_INFO, serde_json::json!({ "path": path })).await?;
+            anyhow::ensure!(info.writable, "can't write to {}", info.path);
+            println!(
+                "{} {} -> {} ({:.1} GB; {:.1} GB free there)",
+                if fresh { "starting fresh:" } else { "moving" },
+                info.current_path,
+                info.path,
+                info.current_cache_bytes as f64 / 1e9,
+                info.available_bytes as f64 / 1e9
+            );
+            let mode = if fresh { "fresh" } else { "move" };
+            let _: Value = c.call(method::STORAGE_RELOCATE, serde_json::json!({ "path": path, "mode": mode })).await?;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                let st: Status = c.call(method::STATUS, Value::Null).await?;
+                let Some(j) = st.storage.job else { continue };
+                let pct = if j.total_bytes > 0 { j.done_bytes * 100 / j.total_bytes } else { 100 };
+                eprint!("\r{:>3}% {}          ", pct, j.message);
+                match j.state.as_str() {
+                    "done" => {
+                        eprintln!();
+                        println!("{}", j.message);
+                        break;
+                    }
+                    "failed" => {
+                        eprintln!();
+                        anyhow::bail!("{}", j.message);
+                    }
+                    _ => {}
+                }
+            }
         }
         Cmd::CatalogRefresh => {
             let v: Value = c.call(method::CATALOG_REFRESH, Value::Null).await?;

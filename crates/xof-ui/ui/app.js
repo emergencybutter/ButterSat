@@ -16,7 +16,10 @@ function show(view) {
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === view));
   document.querySelectorAll(".side a").forEach((a) => a.classList.toggle("active", a.getAttribute("href") === "#" + view));
   if (view === "map") initMap();
-  if (view === "settings") loadSettings();
+  if (view === "settings") {
+    loadSettings();
+    loadStorage();
+  }
   if (view === "packs") loadPacks();
   if (view === "about") loadAbout();
 }
@@ -31,6 +34,7 @@ function pill(id, cls, text) {
 
 function renderStatus(s) {
   status = s;
+  renderStorage(s);
   pill("pill-daemon", "ok", "daemon");
   pill("pill-mount", s.mounted ? "ok" : "warn", s.mounted ? "mounted" : "not mounted");
   pill("pill-sim", s.sim_connected ? "ok" : "", s.sim_connected ? "X-Plane connected" : "X-Plane idle");
@@ -312,6 +316,86 @@ $("f-settings").addEventListener("submit", async (ev) => {
     out.textContent = String(e);
   }
 });
+
+// ---------------------------------------------------------------- storage
+let storageTarget = null;
+
+function renderStorage(s) {
+  const st = s.storage;
+  if (!st) return;
+  $("st-path").textContent = st.cache_path || "–";
+  $("st-free").textContent = st.total_bytes ? `${fmtGB(st.available_bytes)} of ${fmtGB(st.total_bytes)}` : "–";
+  const j = st.job;
+  const prog = $("st-progress");
+  const msg = $("st-msg");
+  if (j && j.state === "running") {
+    prog.classList.remove("hidden");
+    prog.value = j.total_bytes ? Math.round((100 * j.done_bytes) / j.total_bytes) : 0;
+    msg.className = "result";
+    msg.textContent = `${j.mode === "move" ? "Moving" : "Switching"} to ${j.to}: ${fmtGB(j.done_bytes)} of ${fmtGB(j.total_bytes)}…`;
+  } else {
+    prog.classList.add("hidden");
+    if (j && j.state === "failed") {
+      msg.className = "result err";
+      msg.textContent = "Cache move failed: " + j.message;
+    } else if (j && j.state === "done") {
+      msg.className = "result";
+      msg.textContent = j.message;
+    } else if (st.error) {
+      msg.className = "result err";
+      msg.textContent = st.error;
+    }
+  }
+  $("btn-storage").disabled = !!(j && j.state === "running");
+}
+
+async function loadStorage() {
+  try {
+    const cache = await rpc("cache_stats");
+    $("st-usage").textContent = `${fmtGB(cache.imagery_bytes + cache.mesh_bytes)} (imagery ${fmtGB(cache.imagery_bytes)}, meshes ${fmtGB(cache.mesh_bytes)})`;
+  } catch (_) {}
+  if (status) renderStorage(status);
+}
+
+$("btn-storage").addEventListener("click", async () => {
+  const msg = $("st-msg");
+  if (status && status.sim_connected) {
+    msg.className = "result err";
+    msg.textContent = "Close X-Plane first: the scenery is unmounted while the cache moves.";
+    return;
+  }
+  const dir = await T.dialog.open({ directory: true, title: "Choose a folder for the ButterSat cache (any drive)" });
+  if (!dir) return;
+  try {
+    const info = await rpc("storage_info", { path: dir });
+    if (!info.writable) throw new Error("ButterSat can't write to " + info.path);
+    storageTarget = info.path;
+    const enough = info.available_bytes > info.current_cache_bytes + 512 * 1048576;
+    $("st-confirm-text").textContent =
+      `New folder: ${info.path} (${fmtGB(info.available_bytes)} free). ` +
+      `The current cache holds ${fmtGB(info.current_cache_bytes)} in ${info.current_path}.` +
+      (enough ? "" : " There may not be enough room to move it unless it's on the same drive.");
+    $("st-confirm").classList.remove("hidden");
+    msg.textContent = "";
+  } catch (e) {
+    msg.className = "result err";
+    msg.textContent = String(e);
+  }
+});
+
+async function relocate(mode) {
+  $("st-confirm").classList.add("hidden");
+  const msg = $("st-msg");
+  try {
+    renderStorage(Object.assign({}, status, { storage: await rpc("storage_relocate", { path: storageTarget, mode }) }));
+  } catch (e) {
+    msg.className = "result err";
+    msg.textContent = String(e);
+  }
+}
+$("st-move").addEventListener("click", () => relocate("move"));
+$("st-fresh").addEventListener("click", () => relocate("fresh"));
+$("st-cancel").addEventListener("click", () => $("st-confirm").classList.add("hidden"));
 
 // ---------------------------------------------------------------- about
 async function loadAbout() {

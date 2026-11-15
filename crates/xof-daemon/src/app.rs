@@ -17,11 +17,12 @@ use xof_mesh::{MeshConfig, MeshStreamer};
 use xof_proto::config::{DaemonConfig, Dirs, DEFAULT_MESH_KEYS};
 use xof_proto::{
     method, CacheStats, Event, EvictArea, HealthCheck, HealthReport, PackInfo, PrepareDeparture, PrepareResult,
-    Severity, Status, XPlaneInfo,
+    Severity, Status, StorageJob, StorageRelocate, StorageStatus, XPlaneInfo,
 };
 use xof_vfs::{Scenery, SceneryConfig};
 
 use crate::prefetch::Prefetcher;
+use crate::storage;
 use crate::webapi::WebApi;
 use crate::{airports, xplane};
 
@@ -37,6 +38,10 @@ pub struct App {
     config_path: PathBuf,
     cfg: Mutex<DaemonConfig>,
     store: Arc<TileStore>,
+    /// Cache folder in use (configured, or the default as a fallback).
+    cache_root: Mutex<PathBuf>,
+    storage_error: Mutex<Option<String>>,
+    storage_job: Mutex<Option<StorageJob>>,
     stack: Mutex<Stack>,
     mount: Mutex<Option<xof_vfs::Mounted>>,
     mount_error: Mutex<Option<String>>,
@@ -75,6 +80,7 @@ pub fn imported_packs(dirs: &Dirs, cfg: &DaemonConfig) -> Vec<PathBuf> {
 
 fn build_stack(
     dirs: &Dirs,
+    cache_root: &Path,
     cfg: &DaemonConfig,
     store: Arc<TileStore>,
     xp: Option<&Path>,
@@ -101,7 +107,7 @@ fn build_stack(
         Some(MeshStreamer::new(
             MeshConfig {
                 bootstrap_mirrors: cfg.mesh.mirrors.clone(),
-                cache_dir: dirs.cache.join("mesh"),
+                cache_dir: cache_root.join("mesh"),
                 global_scenery: xp.and_then(xplane::global_scenery),
                 coverage: cfg.mesh.coverage.clone(),
                 pinned,
@@ -130,8 +136,23 @@ impl App {
             Some(p) => tracing::info!("X-Plane 12 found at {}", p.display()),
             None => tracing::warn!("X-Plane 12 not found"),
         }
-        let store = TileStore::open(&dirs.cache.join("imagery.redb"))?;
-        let stack = build_stack(&dirs, &cfg, store.clone(), xp.as_deref(), &rt)?;
+        let mut storage_error = None;
+        let configured = cfg.storage.cache_path.as_deref().map(xplane::native_path);
+        let (cache_root, store) = match configured {
+            Some(root) => match TileStore::open(&root.join("imagery.redb")) {
+                Ok(s) => (root, s),
+                Err(e) => {
+                    let msg =
+                        format!("cache folder {} unusable ({e:#}); using {}", root.display(), dirs.cache.display());
+                    tracing::warn!("{msg}");
+                    storage_error = Some(msg);
+                    (dirs.cache.clone(), TileStore::open(&dirs.cache.join("imagery.redb"))?)
+                }
+            },
+            None => (dirs.cache.clone(), TileStore::open(&dirs.cache.join("imagery.redb"))?),
+        };
+        tracing::info!("cache folder: {}", cache_root.display());
+        let stack = build_stack(&dirs, &cache_root, &cfg, store.clone(), xp.as_deref(), &rt)?;
         let port = if cfg.xplane.web_api_port == 0 { 8086 } else { cfg.xplane.web_api_port };
         let web = crate::webapi::spawn(port);
         let prefetch =
@@ -143,6 +164,9 @@ impl App {
             config_path,
             cfg: Mutex::new(cfg),
             store,
+            cache_root: Mutex::new(cache_root),
+            storage_error: Mutex::new(storage_error),
+            storage_job: Mutex::new(None),
             stack: Mutex::new(stack),
             mount: Mutex::new(None),
             mount_error: Mutex::new(None),
@@ -223,7 +247,7 @@ impl App {
             engine: stack.engine.stats(),
             mesh: stack.mesh.as_ref().map(|m| m.status()),
             prefetch: self.prefetch.status(),
-            storage: Default::default(),
+            storage: self.storage_status(),
         }
     }
 
@@ -238,6 +262,29 @@ impl App {
                 fix: fix.map(str::to_string),
             });
         };
+        {
+            let st = self.storage_status();
+            let free_gb = st.available_bytes as f64 / 1e9;
+            if let Some(e) = st.error {
+                add(
+                    "storage",
+                    "Cache folder",
+                    Severity::Warn,
+                    e,
+                    Some("Reconnect the drive, or choose another folder in Settings → Storage."),
+                );
+            } else if st.available_bytes < (5u64 << 30) {
+                add(
+                    "storage",
+                    "Cache folder",
+                    Severity::Warn,
+                    format!("Only {free_gb:.1} GB free on the cache drive ({})", st.cache_path),
+                    Some("Move the cache to a larger drive in Settings → Storage, or lower the cache sizes."),
+                );
+            } else {
+                add("storage", "Cache folder", Severity::Ok, format!("{} ({free_gb:.0} GB free)", st.cache_path), None);
+            }
+        }
         let driver = xof_vfs::driver_name();
         if xof_vfs::driver_available() {
             add("driver", "Filesystem driver", Severity::Ok, format!("{driver} is installed"), None);
@@ -507,12 +554,120 @@ impl App {
         }
     }
 
+    fn storage_status(&self) -> StorageStatus {
+        let root = self.cache_root.lock().clone();
+        let (available_bytes, total_bytes) = storage::space(&root);
+        StorageStatus {
+            cache_path: root.display().to_string(),
+            available_bytes,
+            total_bytes,
+            job: self.storage_job.lock().clone(),
+            error: self.storage_error.lock().clone(),
+        }
+    }
+
+    /// Change the cache folder (design §11): `move` brings the current cache
+    /// along, `fresh` starts empty there and leaves the old folder in place.
+    /// Not while X-Plane is running: the mount goes away during the switch.
+    fn start_relocation(self: &Arc<Self>, req: StorageRelocate) -> anyhow::Result<()> {
+        anyhow::ensure!(req.mode == "move" || req.mode == "fresh", "mode must be 'move' or 'fresh'");
+        anyhow::ensure!(
+            !*self.web.connected.borrow(),
+            "close X-Plane first: the scenery is unmounted while the cache moves"
+        );
+        let from = self.cache_root.lock().clone();
+        let to = xplane::native_path(Path::new(req.path.trim()));
+        storage::validate(&from, &to)?;
+        anyhow::ensure!(storage::writable(&to), "can't write to {}", to.display());
+        {
+            let mut job = self.storage_job.lock();
+            anyhow::ensure!(!job.as_ref().is_some_and(|j| j.state == "running"), "a cache move is already running");
+            *job = Some(StorageJob {
+                to: to.display().to_string(),
+                mode: req.mode.clone(),
+                state: "running".into(),
+                total_bytes: if req.mode == "move" { storage::cache_size(&from) } else { 0 },
+                message: "preparing".into(),
+                ..Default::default()
+            });
+        }
+        let this = self.clone();
+        std::thread::Builder::new().name("cache-move".into()).spawn(move || {
+            let res = this.relocate(&from, &to, &req.mode);
+            let mut job = this.storage_job.lock();
+            if let Some(j) = job.as_mut() {
+                match res {
+                    Ok(note) => {
+                        j.state = "done".into();
+                        j.done_bytes = j.total_bytes;
+                        j.message = note;
+                    }
+                    Err(e) => {
+                        tracing::error!("cache move failed: {e:#}");
+                        j.state = "failed".into();
+                        j.message = format!("{e:#}");
+                    }
+                }
+            }
+        })?;
+        Ok(())
+    }
+
+    fn relocate(self: &Arc<Self>, from: &Path, to: &Path, mode: &str) -> anyhow::Result<String> {
+        tracing::info!("cache folder: {mode} {} -> {}", from.display(), to.display());
+        let was_mounted = self.is_mounted();
+        self.unmount();
+        self.store.close()?;
+        let moved = if mode == "move" {
+            let job = |done: u64, total: u64| {
+                if let Some(j) = self.storage_job.lock().as_mut() {
+                    j.done_bytes = done;
+                    j.total_bytes = total;
+                    j.message = "moving".into();
+                }
+            };
+            storage::move_cache(from, to, job)
+        } else {
+            Ok(())
+        };
+        let result = moved.and_then(|()| {
+            self.store.reopen(&to.join("imagery.redb"))?;
+            let mut cfg = self.cfg.lock().clone();
+            cfg.storage.cache_path = Some(to.to_path_buf());
+            cfg.save(&self.config_path)?;
+            *self.cfg.lock() = cfg;
+            *self.cache_root.lock() = to.to_path_buf();
+            *self.storage_error.lock() = None;
+            self.rebuild()
+        });
+        if let Err(e) = result {
+            // Back to the old folder, as it was.
+            let _ = self.store.reopen(&from.join("imagery.redb"));
+            *self.cache_root.lock() = from.to_path_buf();
+            let _ = self.rebuild();
+            if was_mounted {
+                let _ = self.mount();
+            }
+            return Err(e);
+        }
+        if was_mounted {
+            self.mount()?;
+        }
+        tracing::info!("cache folder now {}", to.display());
+        Ok(if mode == "fresh" {
+            format!("Using {}. The old cache is still in {} — delete it to free space.", to.display(), from.display())
+        } else {
+            format!("Moved to {}.", to.display())
+        })
+    }
+
     /// Rebuild engine/mesh/scenery after a config change; remounts if needed.
     fn rebuild(&self) -> anyhow::Result<()> {
         let cfg = self.cfg.lock().clone();
         let xp = xplane::resolve(cfg.xplane.path.as_deref());
         *self.xplane.lock() = xp.clone();
-        let stack = build_stack(&self.dirs, &cfg, self.store.clone(), xp.as_deref(), &self.rt)?;
+        let root = self.cache_root.lock().clone();
+        let stack = build_stack(&self.dirs, &root, &cfg, self.store.clone(), xp.as_deref(), &self.rt)?;
         self.prefetch.reconfigure(cfg.prefetch.clone(), stack.engine.clone(), stack.mesh.clone());
         let was_mounted = self.is_mounted();
         self.unmount();
@@ -554,7 +709,9 @@ impl App {
             }
             method::GET_CONFIG => Ok(json!(self.config())),
             method::SET_CONFIG => {
-                let new: DaemonConfig = serde_json::from_value(params).map_err(bad)?;
+                let mut new: DaemonConfig = serde_json::from_value(params).map_err(bad)?;
+                // The cache folder changes only through storage_relocate.
+                new.storage = self.cfg.lock().storage.clone();
                 new.save(&self.config_path).map_err(internal)?;
                 if new.startup.start_at_login != self.cfg.lock().startup.start_at_login {
                     if let Err(e) = crate::autostart::apply(new.startup.start_at_login) {
@@ -668,6 +825,28 @@ impl App {
                     })
                     .collect();
                 Ok(json!(packs))
+            }
+            method::STORAGE_INFO => {
+                #[derive(serde::Deserialize)]
+                struct P {
+                    path: String,
+                }
+                let p: P = serde_json::from_value(params).map_err(bad)?;
+                let current = self.cache_root.lock().clone();
+                blocking(Box::new(move || {
+                    let cand = xplane::native_path(Path::new(&p.path));
+                    let mut i = storage::info(&cand, &current);
+                    i.writable = storage::writable(&cand);
+                    let (a, t) = storage::space(&cand);
+                    (i.available_bytes, i.total_bytes) = (a, t);
+                    Ok(json!(i))
+                }))
+                .await
+            }
+            method::STORAGE_RELOCATE => {
+                let p: StorageRelocate = serde_json::from_value(params).map_err(bad)?;
+                self.start_relocation(p).map_err(internal)?;
+                Ok(json!(self.storage_status()))
             }
             method::PACKS_IMPORT => {
                 let src = params.get("path").and_then(Value::as_str).ok_or((-32602, "missing path".to_string()))?;

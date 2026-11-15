@@ -152,3 +152,4 @@ input, select, textarea {
 .sw.ready { background: rgba(95, 177, 138, .6); }
 .sw.cache { background: rgba(58, 110, 165, .55); }
 .sw.pf { background: rgba(255, 196, 0, .35); border: 1px solid #ffc400; }
+.settings progress { width: 100%; height: 8px; }
