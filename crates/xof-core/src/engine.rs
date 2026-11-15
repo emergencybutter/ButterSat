@@ -103,6 +103,9 @@ pub struct EngineStatsSnapshot {
     /// Current live-read budget (changes with the sim phase).
     #[serde(default)]
     pub deadline_ms: u64,
+    /// Current concurrent-request limit.
+    #[serde(default)]
+    pub fetch_limit: u64,
 }
 
 const LATENCY_BOUNDS: [u64; 6] = [10, 50, 200, 1000, 3000, u64::MAX];
@@ -171,6 +174,28 @@ impl TextureEngine {
     /// Default live-read context using the current deadline.
     pub fn live_ctx(&self) -> ReadCtx {
         ReadCtx::xplane(Duration::from_millis(self.live_deadline_ms()))
+    }
+
+    /// Concurrent imagery requests (higher while X-Plane loads).
+    pub fn set_fetch_limit(&self, n: usize) {
+        self.inner.fetcher.set_limit(n);
+    }
+
+    /// Every imagery tile a texture is built from: mips 0-3 at ZL..ZL-3
+    /// (16x16, 8x8, 4x4, 2x2 tiles) and the tail's single ZL-4 tile.
+    pub fn texture_tiles(tex: &TextureId) -> Vec<TileCoord> {
+        let mut out = Vec::with_capacity(341);
+        for mip in 0..4u8 {
+            let n = 16u32 >> mip;
+            let o = tex.origin_at(mip);
+            for dy in 0..n {
+                for dx in 0..n {
+                    out.push(TileCoord::new(o.z, o.x + dx, o.y + dy));
+                }
+            }
+        }
+        out.push(tex.origin_at(4));
+        out
     }
 
     /// Change the live-read budget. While X-Plane shows its loading screen
@@ -279,6 +304,7 @@ impl TextureEngine {
             decoded_ram_bytes: self.inner.decoded.used() as u64,
             reduced_zoom: self.reduced_zoom(),
             deadline_ms: self.live_deadline_ms(),
+            fetch_limit: self.inner.fetcher.limit() as u64,
         }
     }
 

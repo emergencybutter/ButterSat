@@ -461,6 +461,36 @@ impl MeshStreamer {
         read_range(&p, off, len).await.map_err(|e| e.to_string())
     }
 
+    /// Textures X-Plane will read for this tile (from the DSF's terrain
+    /// definitions), downloading the DSF if needed.
+    pub async fn textures(self: &Arc<Self>, t: DsfTile) -> Result<Vec<xof_core::TextureId>, String> {
+        let path = self.ensure_dsf(t).await?;
+        tokio::task::spawn_blocking(move || -> Result<Vec<xof_core::TextureId>, String> {
+            use std::io::Read;
+            // DEFN comes right after the header: a prefix is normally enough.
+            let mut prefix = Vec::new();
+            std::fs::File::open(&path)
+                .and_then(|f| f.take(8 << 20).read_to_end(&mut prefix))
+                .map_err(|e| e.to_string())?;
+            let names = match dsf::terrain_names(&prefix) {
+                Ok(n) => n,
+                Err(_) => {
+                    dsf::terrain_names(&std::fs::read(&path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?
+                }
+            };
+            let mut out: Vec<xof_core::TextureId> = names
+                .iter()
+                .filter_map(|n| xof_core::names::TerName::parse(n.rsplit('/').next().unwrap_or(n)))
+                .map(|t| t.texture)
+                .collect();
+            out.sort_by_key(|t| (t.row, t.col, t.zl));
+            out.dedup_by_key(|t| (t.row, t.col, t.zl));
+            Ok(out)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+
     /// Prefetch a tile: DSF (with splice) and its masks.
     pub async fn prefetch(self: &Arc<Self>, t: DsfTile) -> Result<(), String> {
         self.ensure_dsf(t).await?;

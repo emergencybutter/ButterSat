@@ -117,7 +117,9 @@ impl Prefetcher {
 
     async fn worker(self: Arc<Self>, mut rx: mpsc::UnboundedReceiver<Job>) {
         let mesh_sem = Arc::new(Semaphore::new(2));
-        let img_sem = Arc::new(Semaphore::new(12));
+        // The fetcher's background share is the real limit; this only bounds
+        // spawned tasks.
+        let img_sem = Arc::new(Semaphore::new(64));
         while let Some(job) = rx.recv().await {
             let this = self.clone();
             match job {
@@ -207,7 +209,8 @@ impl Prefetcher {
     }
 
     /// Pre-fetch meshes and low-zoom imagery around a point (prepare departure).
-    pub fn prepare(&self, lat: f64, lon: f64) -> (usize, usize) {
+    pub fn prepare(self: &Arc<Self>, lat: f64, lon: f64) -> (usize, usize) {
+        self.prewarm(lat, lon);
         let mut m = 0;
         for t in DsfTile::containing(lat, lon).neighbourhood(1) {
             m += self.push_mesh(t) as usize;
@@ -219,6 +222,45 @@ impl Prefetcher {
             }
         }
         (m, i)
+    }
+
+    /// Pre-warm what X-Plane loads when a flight starts here: the textures
+    /// listed by the DSFs around the point (downloading those DSFs), nearest
+    /// first, within `prewarm_radius_km`. Runs in the background.
+    pub fn prewarm(self: &Arc<Self>, lat: f64, lon: f64) {
+        let this = self.clone();
+        tokio::spawn(async move {
+            let Some(mesh) = this.mesh.lock().clone() else { return };
+            let radius_m = this.cfg.lock().prewarm_radius_km * 1000.0;
+            let started = std::time::Instant::now();
+            let mut texs = Vec::new();
+            for t in DsfTile::containing(lat, lon).neighbourhood(1) {
+                if !mesh.is_listed(t) {
+                    continue;
+                }
+                match mesh.textures(t).await {
+                    Ok(v) => texs.extend(v),
+                    Err(e) => tracing::debug!("prewarm {t}: {e}"),
+                }
+            }
+            let dist = |x: &xof_core::TextureId| {
+                let (la, lo) = x.center_latlon();
+                haversine(lat, lon, la, lo)
+            };
+            texs.retain(|x| dist(x) <= radius_m);
+            texs.sort_by(|a, b| dist(a).total_cmp(&dist(b)));
+            let mut tiles = 0;
+            for tex in &texs {
+                for t in TextureEngine::texture_tiles(tex) {
+                    tiles += this.push_imagery(t) as usize;
+                }
+            }
+            tracing::info!(
+                "prewarm around {lat:.3},{lon:.3}: {} textures, {tiles} imagery tiles queued ({} ms to list)",
+                texs.len(),
+                started.elapsed().as_millis()
+            );
+        });
     }
 
     /// Seed meshes and the lowest imagery zooms along a route.

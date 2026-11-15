@@ -399,11 +399,16 @@ impl App {
         loop {
             tick.tick().await;
             let loading = self.web.loading();
-            let (d_fly, d_load) = {
+            let (d_fly, d_load, r_fly, r_load) = {
                 let c = self.config();
-                (c.imagery.deadline_ms, c.imagery.loading_deadline_ms.max(c.imagery.deadline_ms))
+                let i = &c.imagery;
+                (i.deadline_ms, i.loading_deadline_ms.max(i.deadline_ms), i.max_requests, i.loading_max_requests)
             };
-            self.stack.lock().engine.set_live_deadline_ms(if loading { d_load } else { d_fly });
+            {
+                let stack = self.stack.lock();
+                stack.engine.set_live_deadline_ms(if loading { d_load } else { d_fly });
+                stack.engine.set_fetch_limit(if loading { r_load } else { r_fly });
+            }
             if was != Some(loading) {
                 tracing::info!(
                     "sim {}: read budget {} ms",
@@ -411,6 +416,33 @@ impl App {
                     if loading { d_load } else { d_fly }
                 );
                 was = Some(loading);
+            }
+        }
+    }
+
+    /// Pre-warm around X-Plane's last position when it changes (X-Plane writes
+    /// `last.pos` on exit) and once at start, unless a flight is running.
+    pub async fn last_position(self: Arc<Self>) {
+        let mut tick = tokio::time::interval(Duration::from_secs(30));
+        let mut seen: Option<std::time::SystemTime> = None;
+        loop {
+            tick.tick().await;
+            if !self.config().prefetch.prewarm_last_position || !self.web.loading() {
+                continue;
+            }
+            let Some(xp) = self.xplane.lock().clone() else { continue };
+            let p = xp.join("Output").join("preferences").join("last.pos");
+            let Ok(mtime) = std::fs::metadata(&p).and_then(|m| m.modified()) else { continue };
+            if seen == Some(mtime) {
+                continue;
+            }
+            seen = Some(mtime);
+            match std::fs::read_to_string(&p).ok().as_deref().and_then(parse_last_pos) {
+                Some((lat, lon)) => {
+                    tracing::info!("last X-Plane position {lat:.4},{lon:.4}: pre-warming");
+                    self.prefetch.prewarm(lat, lon);
+                }
+                None => tracing::debug!("unreadable {}", p.display()),
             }
         }
     }
@@ -651,6 +683,13 @@ impl App {
     }
 }
 
+/// `Output/preferences/last.pos`: `lat/lon` as text (X-Plane 12).
+pub fn parse_last_pos(s: &str) -> Option<(f64, f64)> {
+    let (a, b) = s.trim().split_once('/')?;
+    let (lat, lon): (f64, f64) = (a.trim().parse().ok()?, b.trim().parse().ok()?);
+    ((-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon)).then_some((lat, lon))
+}
+
 /// WinFsp needs a non-existent directory; FUSE an existing empty one.
 fn prepare_mount_point(mp: &Path) -> anyhow::Result<()> {
     let parent = mp.parent().ok_or_else(|| anyhow::anyhow!("bad mount point"))?;
@@ -679,4 +718,22 @@ fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn last_pos() {
+        let (lat, lon) = parse_last_pos(
+            "20.89341352900162008/-156.43653712671488165
+",
+        )
+        .unwrap();
+        assert!((lat - 20.893413529).abs() < 1e-6 && (lon + 156.436537127).abs() < 1e-6);
+        assert_eq!(parse_last_pos("40.6/-73.7"), Some((40.6, -73.7)));
+        assert_eq!(parse_last_pos("nonsense"), None);
+        assert_eq!(parse_last_pos("95/10"), None);
+    }
 }

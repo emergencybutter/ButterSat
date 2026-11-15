@@ -111,7 +111,14 @@ async fn run_variant(
             daemon::config_toml(&opts.install, opts.port, origin.map(|o| o.url.as_str()), &sc.public_keys, &v.config)?;
         let exe = daemon::daemon_exe(opts.daemon_exe.as_deref())?;
         log(format!("starting daemon (home {})", home.display()));
-        dmn = Some(Daemon::start(&exe, &home, &cfg).await?);
+        let d = Daemon::start(&exe, &home, &cfg).await?;
+        if let Some(wait) = v.prewarm_wait_s {
+            let s = &sc.spots[0];
+            d.prepare(s.lat, s.lon).await?;
+            log(format!("pre-warming {} (then {wait:.0} s before launching X-Plane)", s.name));
+            tokio::time::sleep(Duration::from_secs_f64(wait)).await;
+        }
+        dmn = Some(d);
     }
     let r = fly(sc, v, opts, run_dir, xp, dmn.as_ref(), vr, rec).await;
     if r.is_err() {

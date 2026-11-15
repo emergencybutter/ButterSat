@@ -110,6 +110,14 @@ impl Daemon {
         self.client.call(method::STATUS, Value::Null).await
     }
 
+    pub async fn prepare(&self, lat: f64, lon: f64) -> anyhow::Result<()> {
+        let _: Value = self
+            .client
+            .call(method::PREPARE_DEPARTURE, xof_proto::PrepareDeparture { icao: None, lat: Some(lat), lon: Some(lon) })
+            .await?;
+        Ok(())
+    }
+
     pub async fn engine(&self) -> Option<EngineStatsSnapshot> {
         self.status().await.ok().map(|s| s.engine)
     }

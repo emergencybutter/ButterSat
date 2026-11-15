@@ -1,0 +1,50 @@
+# Cold start time: the flight loads at JFK with empty caches. A/B of fetch
+# concurrency and departure pre-warming. (Esri's CDN has these NYC tiles
+# cached by now, so absolute times are optimistic for a first-time user.)
+name = "nyc-cold"
+slew_speed_kt = 250
+shots_s = [0, 5]
+compare_to = "reference"
+origin = "../../xporthofs-build/origin"
+public_keys = ["7edb3db45bc7858959a6347242b3804b7f360012446389288f417323290ddf94"]
+
+[[spot]]
+name = "JFK (ZL17)"
+lat = 40.6413
+lon = -73.7781
+alt_ft = 3000
+
+[[spot]]
+name = "Midtown"
+lat = 40.7540
+lon = -73.9840
+alt_ft = 2500
+
+[[spot]]
+name = "Pelham Bay"
+lat = 40.8650
+lon = -73.8100
+alt_ft = 3000
+
+[[variant]]
+name = "reference"
+packs = ["../../xporthofs-build/Ortho4XP/Tiles/zOrtho4XP_+40-074"]
+
+[[variant]]
+name = "xof-16"
+description = "previous fetch concurrency: 16 requests"
+xof = true
+[variant.config.imagery]
+max_requests = 16
+loading_max_requests = 16
+
+[[variant]]
+name = "xof-64"
+description = "new: 64 requests while loading (32 in flight)"
+xof = true
+
+[[variant]]
+name = "xof-prewarm"
+description = "new concurrency + departure pre-warm started when X-Plane is launched"
+xof = true
+prewarm_wait_s = 0

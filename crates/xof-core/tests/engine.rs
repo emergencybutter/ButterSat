@@ -205,3 +205,14 @@ async fn reduced_zoom_builds_mip0_from_parent() {
     let data = e.read(&tex(), m0.offset(), 8, e.live_ctx()).await.unwrap();
     assert!(close(bc1::decode(&data, 4, 4).px(0, 0), color(16)));
 }
+
+#[test]
+fn texture_tiles_cover_all_mips() {
+    let t = xof_core::TextureId::new(24560, 19344, 16, "XO");
+    let tiles = TextureEngine::texture_tiles(&t);
+    assert_eq!(tiles.len(), 256 + 64 + 16 + 4 + 1);
+    assert_eq!(tiles.iter().filter(|c| c.z == 16).count(), 256);
+    assert_eq!(tiles.iter().filter(|c| c.z == 12).count(), 1);
+    assert!(tiles.contains(&xof_core::TileCoord::new(16, 19344, 24560)));
+    assert!(tiles.contains(&xof_core::TileCoord::new(16, 19359, 24575)));
+}

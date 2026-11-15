@@ -87,6 +87,10 @@ pub struct Variant {
     pub packs: Vec<PathBuf>,
     #[serde(default)]
     pub cache: CacheMode,
+    /// Ask the daemon to pre-warm the first spot ("prepare departure") before
+    /// X-Plane is launched, then wait this many seconds (time in the menus).
+    #[serde(default)]
+    pub prewarm_wait_s: Option<f64>,
     /// Daemon config overrides, merged into the generated config.toml.
     #[serde(default)]
     pub config: toml::Table,

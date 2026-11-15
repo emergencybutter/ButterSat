@@ -37,3 +37,21 @@ fn strip_recovers_stripped_from_reference() {
     let reference = std::fs::read(dir.join("b-reference/+40-074.dsf")).unwrap();
     assert!(dsf::strip_rasters(&reference).unwrap() == stripped);
 }
+
+#[test]
+fn reference_dsf_lists_its_textures() {
+    let Ok(dir) = std::env::var("XOF_PILOT_DIR") else {
+        eprintln!("skipped: XOF_PILOT_DIR not set");
+        return;
+    };
+    let dsf = std::fs::read(std::path::Path::new(&dir).join("b-reference/+40-074.dsf")).unwrap();
+    let names = xof_mesh::dsf::terrain_names(&dsf).unwrap();
+    let tex: std::collections::BTreeSet<_> = names
+        .iter()
+        .filter_map(|n| xof_core::TerName::parse(n.rsplit('/').next().unwrap()))
+        .map(|t| t.texture.stem())
+        .collect();
+    // The Ortho4XP build of this tile has 130 textures (its textures/ folder).
+    assert_eq!(tex.len(), 130, "{tex:?}");
+    assert!(tex.iter().any(|t| t.ends_with("XO17")), "ZL17 airport textures listed");
+}

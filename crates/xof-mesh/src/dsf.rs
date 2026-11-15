@@ -158,6 +158,34 @@ pub fn extract_rasters(gs: &[u8]) -> Result<Option<Rasters>, DsfError> {
     Ok(Some(Rasters { demn, dems }))
 }
 
+pub const TERT: [u8; 4] = *b"TRET";
+
+/// Terrain definitions (`DEFN/TERT`), e.g. `terrain/24560_19344_XO16.ter`:
+/// for an Ortho4XP mesh, the textures X-Plane will read for this tile.
+/// Only the header part of the file is needed (`DEFN` precedes geometry).
+pub fn terrain_names(dsf: &[u8]) -> Result<Vec<String>, DsfError> {
+    if dsf.len() < HEADER_LEN || &dsf[..8] != MAGIC {
+        return Err(DsfError::BadMagic);
+    }
+    // Walk atoms from the header; tolerate a missing MD5/tail (partial reads).
+    for a in atoms(&dsf[HEADER_LEN..]) {
+        let Ok((tag, payload)) = a else { break };
+        if tag == DEFN {
+            let mut out = Vec::new();
+            for s in atoms(payload) {
+                let (t, p) = s?;
+                if t == TERT {
+                    out.extend(
+                        p.split(|&b| b == 0).filter(|s| !s.is_empty()).map(|s| String::from_utf8_lossy(s).into_owned()),
+                    );
+                }
+            }
+            return Ok(out);
+        }
+    }
+    Err(DsfError::Missing("DEFN"))
+}
+
 /// Does this DSF carry raster data? Hosted DSFs must not (publish guard).
 pub fn has_raster_data(dsf: &[u8]) -> Result<bool, DsfError> {
     let (_, body) = split(dsf)?;
@@ -351,6 +379,25 @@ pub(crate) mod tests {
         assert_eq!(twice.len(), out.len());
         // Strip is the exact inverse.
         assert_eq!(strip_rasters(&out).unwrap(), s);
+    }
+
+    #[test]
+    fn lists_terrain_definitions() {
+        let mut d = Vec::new();
+        push_atom(
+            &mut d,
+            TERT,
+            b"terrain/24560_19344_XO16.ter\0terrain/24560_19344_XO16_sea_overlay.ter\0lib/g8/x.ter\0",
+        );
+        push_atom(&mut d, DEMN, b"");
+        let dsf = make_dsf(&[(*b"DAEH", b"p".to_vec()), (DEFN, d), (*b"DOEG", vec![0; 4])]);
+        assert_eq!(
+            terrain_names(&dsf).unwrap(),
+            ["terrain/24560_19344_XO16.ter", "terrain/24560_19344_XO16_sea_overlay.ter", "lib/g8/x.ter"]
+        );
+        // Works on a prefix of the file (no MD5, truncated geometry).
+        assert_eq!(terrain_names(&dsf[..dsf.len() - 20]).unwrap().len(), 3);
+        assert!(terrain_names(&make_dsf(&[(*b"DAEH", vec![])])).is_err());
     }
 
     #[test]

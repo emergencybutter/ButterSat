@@ -24,9 +24,12 @@ pub trait Provider: Send + Sync {
     fn max_zoom(&self) -> u8;
     /// URL for a tile.
     fn tile_url(&self, t: TileCoord) -> String;
-    /// Maximum concurrent requests.
+    /// Upper bound on concurrent requests (the fetcher's limit moves below
+    /// it: higher while X-Plane loads, lower in flight). Requests are
+    /// latency-bound (~130 ms each for uncached Esri tiles), so throughput
+    /// scales with concurrency: measured 125/194/330 tiles/s at 16/32/64.
     fn max_concurrency(&self) -> usize {
-        16
+        64
     }
     /// Is this response a "no imagery here" placeholder?
     fn is_no_data(&self, status: u16, headers: &reqwest::header::HeaderMap, body: &[u8]) -> bool {
@@ -136,6 +139,11 @@ pub struct Fetcher {
     /// Background requests also take one here, so they can never use all
     /// permits and starve live reads.
     background: Arc<Semaphore>,
+    /// Semaphores are sized for `max`; permits parked here lower the
+    /// effective limit (see [`Fetcher::set_limit`]).
+    max: usize,
+    limit: std::sync::atomic::AtomicUsize,
+    parked: Mutex<(Vec<tokio::sync::OwnedSemaphorePermit>, Vec<tokio::sync::OwnedSemaphorePermit>)>,
     inflight: Mutex<
         HashMap<TileCoord, futures::future::Shared<futures::future::BoxFuture<'static, Result<Fetched, String>>>>,
     >,
@@ -152,15 +160,51 @@ impl Fetcher {
             .pool_max_idle_per_host(32)
             .build()?;
         let n = provider.max_concurrency().max(2);
-        Ok(Self {
+        let f = Self {
             client,
             total: Arc::new(Semaphore::new(n)),
-            background: Arc::new(Semaphore::new((n * 3 / 4).max(1))),
+            background: Arc::new(Semaphore::new(Self::bg_share(n))),
+            max: n,
+            limit: std::sync::atomic::AtomicUsize::new(n),
+            parked: Mutex::new((Vec::new(), Vec::new())),
             provider,
             inflight: Mutex::new(HashMap::new()),
             stats: Arc::new(FetchStats::default()),
             retries: 3,
-        })
+        };
+        f.set_limit(n / 2);
+        Ok(f)
+    }
+
+    fn bg_share(n: usize) -> usize {
+        (n * 3 / 4).max(1)
+    }
+
+    /// Change the number of concurrent requests (clamped to 2..=max). Lowering
+    /// parks free permits; permits still in use are parked by later calls
+    /// (the daemon re-applies the limit several times a second).
+    pub fn set_limit(&self, n: usize) {
+        let n = n.clamp(2, self.max);
+        self.limit.store(n, Ordering::Relaxed);
+        let mut parked = self.parked.lock();
+        let (pt, pb) = &mut *parked;
+        Self::park(&self.total, pt, self.max - n);
+        Self::park(&self.background, pb, Self::bg_share(self.max) - Self::bg_share(n));
+    }
+
+    fn park(sem: &Arc<Semaphore>, parked: &mut Vec<tokio::sync::OwnedSemaphorePermit>, target: usize) {
+        parked.truncate(target);
+        while parked.len() < target {
+            match sem.clone().try_acquire_owned() {
+                Ok(p) => parked.push(p),
+                Err(_) => break,
+            }
+        }
+    }
+
+    /// Current limit and how many permits are actually parked (diagnostics).
+    pub fn limit(&self) -> usize {
+        self.limit.load(Ordering::Relaxed)
     }
 
     pub fn provider(&self) -> &Arc<dyn Provider> {
@@ -271,6 +315,27 @@ pub fn decode_tile(bytes: &[u8]) -> anyhow::Result<Tile> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn limit_parks_and_releases_permits() {
+        let f = Fetcher::new(Arc::new(Esri)).unwrap();
+        assert_eq!(f.max, 64);
+        assert_eq!(f.limit(), 32, "starts at half the maximum");
+        assert_eq!(f.total.available_permits(), 32);
+        assert_eq!(f.background.available_permits(), 48 - 24);
+        f.set_limit(64);
+        assert_eq!(f.total.available_permits(), 64);
+        assert_eq!(f.background.available_permits(), 48);
+        // Permits in use can't be parked yet; a later call catches up.
+        let held: Vec<_> = (0..60).map(|_| f.total.clone().try_acquire_owned().unwrap()).collect();
+        f.set_limit(16);
+        assert_eq!(f.total.available_permits(), 0);
+        drop(held);
+        f.set_limit(16);
+        assert_eq!(f.total.available_permits(), 16);
+        f.set_limit(1);
+        assert_eq!(f.limit(), 2, "clamped");
+    }
 
     #[test]
     fn urls() {

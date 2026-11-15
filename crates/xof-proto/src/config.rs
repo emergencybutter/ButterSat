@@ -82,6 +82,9 @@ pub struct ImageryConfig {
     /// Budget while X-Plane is loading (loading screen: nothing to stall,
     /// and degraded bands would stay for the whole session).
     pub loading_deadline_ms: u64,
+    /// Concurrent imagery requests in flight / while X-Plane loads.
+    pub max_requests: usize,
+    pub loading_max_requests: usize,
     pub cache_size_gb: u64,
     pub segment_ram_mb: usize,
     pub decoded_ram_mb: usize,
@@ -94,6 +97,8 @@ impl Default for ImageryConfig {
             provider_notice_accepted: false,
             deadline_ms: 1200,
             loading_deadline_ms: 20_000,
+            max_requests: 32,
+            loading_max_requests: 64,
             cache_size_gb: 100,
             segment_ram_mb: 1024,
             decoded_ram_mb: 256,
@@ -139,6 +144,13 @@ pub struct PrefetchConfig {
     pub dynamic_zoom: bool,
     /// Above this height (feet AGL) mip 0 is built from ZL-1.
     pub dynamic_zoom_agl_ft: f64,
+    /// Pre-warm the textures X-Plane will load around a departure point
+    /// (prepare, last position), nearest first, up to this radius.
+    pub prewarm_radius_km: f64,
+    /// Pre-warm around X-Plane's last position (`Output/preferences/last.pos`)
+    /// whenever it changes and X-Plane isn't flying: most flights start near
+    /// the previous one.
+    pub prewarm_last_position: bool,
 }
 
 impl Default for PrefetchConfig {
@@ -149,6 +161,8 @@ impl Default for PrefetchConfig {
             lookahead_minutes: 8.0,
             dynamic_zoom: true,
             dynamic_zoom_agl_ft: 12_000.0,
+            prewarm_radius_km: 40.0,
+            prewarm_last_position: true,
         }
     }
 }
