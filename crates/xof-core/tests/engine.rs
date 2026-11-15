@@ -81,10 +81,12 @@ async fn serve(slow_z: u8, delay: Duration) -> (String, Arc<Hits>) {
     let addr = listener.local_addr().unwrap();
     let hits = Arc::new(Hits::default());
     let h = hits.clone();
+    let pngs: Arc<std::collections::HashMap<u8, Vec<u8>>> = Arc::new((0..=19u8).map(|z| (z, png(color(z)))).collect());
     tokio::spawn(async move {
         loop {
             let (mut sock, _) = listener.accept().await.unwrap();
             let h = h.clone();
+            let pngs = pngs.clone();
             tokio::spawn(async move {
                 let mut buf = vec![0u8; 4096];
                 let n = sock.read(&mut buf).await.unwrap_or(0);
@@ -98,13 +100,13 @@ async fn serve(slow_z: u8, delay: Duration) -> (String, Arc<Hits>) {
                 if z == slow_z {
                     tokio::time::sleep(delay).await;
                 }
-                let body = png(color(z));
+                let body = &pngs[&z.min(19)];
                 let head = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                     body.len()
                 );
                 let _ = sock.write_all(head.as_bytes()).await;
-                let _ = sock.write_all(&body).await;
+                let _ = sock.write_all(body).await;
             });
         }
     });
@@ -137,7 +139,7 @@ fn close(a: [u8; 4], b: [u8; 3]) -> bool {
 async fn full_read_uses_matching_zoom_per_mip() {
     let (base, hits) = serve(255, Duration::ZERO).await;
     let dir = tempfile::tempdir().unwrap();
-    let e = engine(base, dir.path(), 10_000);
+    let e = engine(base, dir.path(), 60_000);
     let ctx = e.live_ctx();
     let file = e.read(&tex(), 0, dds::FILE_LEN, ctx).await.unwrap();
     assert_eq!(file.len() as u64, dds::FILE_LEN);

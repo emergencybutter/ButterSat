@@ -423,11 +423,15 @@ impl TextureEngine {
         let s = &self.inner.stats;
         s.segments_built.fetch_add(1, Ordering::Relaxed);
         if buf.degraded {
-            s.degraded_built.fetch_add(1, Ordering::Relaxed);
-        }
-        self.inner.segs.insert(key.clone(), buf.clone(), buf.data.len());
-        if buf.degraded && !(matches!(seg, Segment::Band { mip: 0, .. }) && self.reduced_zoom()) {
-            self.schedule_upgrade(key);
+            if ctx.class == ReaderClass::XPlane {
+                s.degraded_built.fetch_add(1, Ordering::Relaxed);
+                self.inner.segs.insert(key.clone(), buf.clone(), buf.data.len());
+                if !(matches!(seg, Segment::Band { mip: 0, .. }) && self.reduced_zoom()) {
+                    self.schedule_upgrade(key);
+                }
+            }
+        } else {
+            self.inner.segs.insert(key.clone(), buf.clone(), buf.data.len());
         }
         Ok(buf)
     }

@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[cfg(windows)]
 const NAME: &str = "ButterSat";
 
 fn daemon_exe() -> anyhow::Result<PathBuf> {

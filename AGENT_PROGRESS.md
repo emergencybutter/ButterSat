@@ -1,0 +1,2 @@
+2026-11-15T20:55:00Z Started release task on worktree ButterSat-wt-release (branch agent/release); reviewed common.md, release.md, design.md, bench.md, and existing build/installer configs.
+2026-11-15T21:10:30Z Diagnosed CI failures on main (xof-core engine tests scheduling background upgrades for ReaderClass::Other and mock PNG re-encoding overhead); applied fix and verified locally (engine tests pass in 1.76s). Generated Tauri updater minisign keypair in xporthofs-build/keys/updater.key.
