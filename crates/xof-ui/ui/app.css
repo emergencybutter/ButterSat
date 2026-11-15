@@ -170,6 +170,7 @@ input, select, textarea {
 .log .WARN { color: var(--warn); }
 .log .ERROR { color: var(--err); }
 .banner { padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; border: 1px solid var(--warn); color: var(--warn); background: var(--panel); }
+.banner.update { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-color: var(--info); color: var(--ink); }
 .hist { display: flex; align-items: flex-end; gap: 4px; height: 46px; margin-top: 12px; }
 .hist div { flex: 1; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px; opacity: .85; }
 .hist-labels { display: flex; gap: 4px; font-size: 10px; color: var(--muted); }

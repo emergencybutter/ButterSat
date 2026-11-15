@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Main window: daemon RPC passthrough, events, folder picker, open links.",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-set-size", "core:window:allow-inner-size", "dialog:allow-open", "opener:allow-open-url", "opener:allow-reveal-item-in-dir"]
+  "permissions": ["core:default", "core:window:allow-set-size", "core:window:allow-inner-size", "dialog:allow-open", "opener:allow-open-url", "opener:allow-reveal-item-in-dir", "updater:default"]
 }

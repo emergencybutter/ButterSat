@@ -30,6 +30,14 @@ enum Cmd {
     Unmount,
     /// Stop the daemon.
     Shutdown,
+    /// Clean up ButterSat before uninstalling: stop the daemon, unmount, remove
+    /// our `scenery_packs.ini` entry and login registration, and optionally
+    /// delete cached imagery and meshes.
+    Uninstall {
+        /// Also delete user config, logs, and cached imagery/meshes.
+        #[arg(long)]
+        remove_cache: bool,
+    },
     /// Show the configuration (TOML).
     Config,
     /// Set a configuration value, e.g. `imagery.provider bing`.
@@ -191,14 +199,103 @@ async fn run_standalone(
     Ok(())
 }
 
+async fn stop_daemon_and_wait() -> anyhow::Result<bool> {
+    let Ok(c) = Client::connect().await else {
+        return Ok(false);
+    };
+    let _ = c.call::<_, Value>(method::SHUTDOWN, Value::Null).await;
+    let lock_path = xof_proto::config::Dirs::standard().data.join("daemon.lock");
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        let connected = Client::connect().await.is_ok();
+        let locked = std::fs::OpenOptions::new().write(true).open(&lock_path).is_ok_and(|f| f.try_lock().is_err());
+        if !connected && !locked {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    Ok(true)
+}
+
+fn disable_autostart() {
+    #[cfg(windows)]
+    {
+        if std::env::var_os("XOF_HOME").is_none() {
+            let _ = std::process::Command::new("reg")
+                .args(["delete", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "ButterSat", "/f"])
+                .output();
+        }
+    }
+}
+
+async fn run_uninstall(remove_cache: bool) -> anyhow::Result<()> {
+    let _ = stop_daemon_and_wait().await;
+    let dirs = xof_proto::config::Dirs::standard();
+    let cfg = xof_proto::config::DaemonConfig::load(&dirs.config_file).unwrap_or_default();
+
+    disable_autostart();
+
+    if let Some(mp) = &cfg.mount.path {
+        let _ = std::fs::remove_dir(mp);
+    }
+    let mut xp_paths = Vec::new();
+    if let Some(p) = &cfg.xplane.path {
+        xp_paths.push(xof_proto::xplane::native_path(p));
+    }
+    if std::env::var_os("XOF_HOME").is_none() {
+        for p in xof_proto::xplane::detect_installs() {
+            if !xp_paths.contains(&p) {
+                xp_paths.push(p);
+            }
+        }
+    }
+    for xp in &xp_paths {
+        if let Ok(true) = xof_proto::xplane::remove_scenery_pack(xp) {
+            println!("removed {} from {}/Custom Scenery/scenery_packs.ini", xof_proto::xplane::PACK_NAME, xp.display());
+        }
+    }
+
+    if remove_cache {
+        if let Some(relocated) = &cfg.storage.cache_path {
+            let _ = std::fs::remove_file(relocated.join("imagery.redb"));
+            let _ = std::fs::remove_dir_all(relocated.join("mesh"));
+            let _ = std::fs::remove_dir(relocated);
+        }
+        let _ = std::fs::remove_dir_all(&dirs.cache);
+        let _ = std::fs::remove_dir_all(&dirs.data);
+        let _ = std::fs::remove_file(&dirs.config_file);
+        if let Some(cfg_dir) = dirs.config_file.parent() {
+            let _ = std::fs::remove_dir(cfg_dir);
+        }
+        println!("removed cached data and configuration");
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    if let Cmd::Run { pack, mount, provider, deadline_ms, cache } = cli.cmd {
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-            .init();
-        return run_standalone(pack, mount, provider, deadline_ms, cache).await;
+    match cli.cmd {
+        Cmd::Run { pack, mount, provider, deadline_ms, cache } => {
+            tracing_subscriber::fmt()
+                .with_env_filter(
+                    tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+                )
+                .init();
+            return run_standalone(pack, mount, provider, deadline_ms, cache).await;
+        }
+        Cmd::Shutdown => {
+            if stop_daemon_and_wait().await? {
+                println!("daemon stopped");
+            } else {
+                println!("daemon not running");
+            }
+            return Ok(());
+        }
+        Cmd::Uninstall { remove_cache } => {
+            return run_uninstall(remove_cache).await;
+        }
+        _ => {}
     }
     let c = Client::connect().await.map_err(|e| anyhow::anyhow!("cannot reach xof-daemon ({e}); is it running?"))?;
     match cli.cmd {
@@ -232,10 +329,7 @@ async fn main() -> anyhow::Result<()> {
             c.call::<_, Value>(method::UNMOUNT, Value::Null).await?;
             println!("unmounted");
         }
-        Cmd::Shutdown => {
-            c.call::<_, Value>(method::SHUTDOWN, Value::Null).await?;
-            println!("daemon stopping");
-        }
+        Cmd::Shutdown | Cmd::Uninstall { .. } => unreachable!(),
         Cmd::Config => {
             let v: xof_proto::config::DaemonConfig = c.call(method::GET_CONFIG, Value::Null).await?;
             print!("{}", toml::to_string_pretty(&v)?);

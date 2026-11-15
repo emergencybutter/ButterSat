@@ -10,6 +10,48 @@ const fmtGB = (b) => (b / 1073741824).toFixed(1) + " GB";
 
 let status = null;
 let config = null;
+let pendingUpdate = null;
+
+function renderUpdateBanner() {
+  const banner = $("update-banner");
+  if (!banner) return;
+  if (!pendingUpdate || !pendingUpdate.available) {
+    banner.classList.add("hidden");
+    return;
+  }
+  banner.classList.remove("hidden");
+  const simRunning = !!(status && status.sim_connected);
+  const btn = $("btn-update");
+  btn.disabled = simRunning;
+  btn.title = simRunning ? "Close X-Plane before installing an update" : "Download and install ButterSat " + pendingUpdate.version;
+  $("update-text").textContent = simRunning
+    ? `ButterSat ${pendingUpdate.version} is available (close X-Plane to install).`
+    : `ButterSat ${pendingUpdate.version} is available${pendingUpdate.body ? " — " + pendingUpdate.body : ""}.`;
+}
+
+async function checkUpdates(manual) {
+  const aboutMsg = $("about-update");
+  if (manual && aboutMsg) {
+    aboutMsg.className = "result";
+    aboutMsg.textContent = "Checking for updates…";
+  }
+  try {
+    const u = await T.core.invoke("update_check");
+    pendingUpdate = u;
+    renderUpdateBanner();
+    if (aboutMsg) {
+      aboutMsg.className = "result";
+      aboutMsg.textContent = u.available
+        ? `Update ${u.version} available — see Overview to install.`
+        : `Up to date (${u.current_version}).`;
+    }
+  } catch (e) {
+    if (manual && aboutMsg) {
+      aboutMsg.className = "result err";
+      aboutMsg.textContent = "Update check failed: " + e;
+    }
+  }
+}
 
 // ---------------------------------------------------------------- navigation
 function show(view) {
@@ -168,6 +210,7 @@ function pill(id, cls, text) {
 function renderStatus(s) {
   status = s;
   renderStorage(s);
+  renderUpdateBanner();
   pill("pill-daemon", "ok", "daemon");
   pill("pill-mount", s.mounted ? "ok" : "warn", s.mounted ? "mounted" : "not mounted");
   pill("pill-sim", s.sim_connected ? "ok" : "", s.sim_connected ? "X-Plane connected" : "X-Plane idle");
@@ -538,6 +581,24 @@ async function loadAbout() {
   [...$("notices").children].forEach((li, i) => (li.textContent = a.notices[i]));
 }
 
+$("btn-check-update").addEventListener("click", () => checkUpdates(true));
+$("btn-update").addEventListener("click", async (ev) => {
+  if (status && status.sim_connected) {
+    alert("Close X-Plane before installing an update so your flight is not interrupted.");
+    return;
+  }
+  const b = ev.currentTarget;
+  b.disabled = true;
+  $("update-text").textContent = `Downloading and installing ButterSat ${pendingUpdate ? pendingUpdate.version : ""}…`;
+  try {
+    await T.core.invoke("update_install");
+  } catch (e) {
+    alert(e);
+    b.disabled = false;
+    renderUpdateBanner();
+  }
+});
+
 // ---------------------------------------------------------------- wiring
 async function refresh() {
   try {
@@ -570,4 +631,5 @@ T.event.listen("daemon-disconnected", () => {
 
 show(location.hash.slice(1) || "overview");
 refresh();
+checkUpdates(false);
 setInterval(refreshMapData, 30000);
