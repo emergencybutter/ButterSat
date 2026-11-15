@@ -180,7 +180,14 @@ fn handle(mut stream: TcpStream, root: &Path) -> std::io::Result<()> {
             stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")?;
         }
     }
-    stream.flush()
+    stream.flush()?;
+    // Graceful close: closing with unread input makes Windows send RST,
+    // which can destroy the response before the client reads it.
+    stream.shutdown(std::net::Shutdown::Write)?;
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    let mut sink = [0u8; 1024];
+    while matches!(reader.read(&mut sink), Ok(n) if n > 0) {}
+    Ok(())
 }
 
 #[cfg(test)]
