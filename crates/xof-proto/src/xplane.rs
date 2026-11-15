@@ -33,7 +33,7 @@ pub fn parse_install_list(text: &str) -> Vec<PathBuf> {
         if l.is_empty() {
             continue;
         }
-        let p = PathBuf::from(l);
+        let p = native_path(Path::new(l));
         if !out.contains(&p) {
             out.push(p);
         }
@@ -41,10 +41,22 @@ pub fn parse_install_list(text: &str) -> Vec<PathBuf> {
     out
 }
 
+/// Use the platform's separator throughout. X-Plane writes its install
+/// list with forward slashes on Windows (`C:\Program Files (x86)/Steam/...`);
+/// joined with `\` parts that gave mixed paths in the UI.
+pub fn native_path(p: &Path) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(p.to_string_lossy().replace('/', "\\"))
+    } else {
+        p.to_path_buf()
+    }
+}
+
 /// The configured path if valid, else the first detected install.
 pub fn resolve(configured: Option<&Path>) -> Option<PathBuf> {
     if let Some(p) = configured {
-        return is_valid_install(p).then(|| p.to_path_buf());
+        let p = native_path(p);
+        return is_valid_install(&p).then_some(p);
     }
     detect_installs().into_iter().next()
 }
@@ -167,6 +179,15 @@ mod tests {
         let re = insert_pack_entry(&disabled).unwrap();
         assert_eq!(re.matches("z_buttersat").count(), 1);
         assert!(re.contains("SCENERY_PACK Custom Scenery/z_buttersat/"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn install_paths_use_native_separators() {
+        let l = parse_install_list("C:\\Program Files (x86)/Steam/steamapps/common/X-Plane 12/\r\n");
+        assert_eq!(l, [PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps\common\X-Plane 12")]);
+        let mp = default_mount_point(&l[0]);
+        assert!(!mp.to_string_lossy().contains('/'), "{}", mp.display());
     }
 
     #[test]
