@@ -68,7 +68,10 @@ pub const TAIL_LEN: u64 = FILE_LEN - TAIL_OFFSET;
 pub enum Segment {
     Header,
     /// One band of a banded mip.
-    Band { mip: u8, band: u8 },
+    Band {
+        mip: u8,
+        band: u8,
+    },
     /// Mips 4..=12.
     Tail,
 }
@@ -93,9 +96,10 @@ impl Segment {
     /// All segments in file order.
     pub fn all() -> impl Iterator<Item = Segment> {
         std::iter::once(Segment::Header)
-            .chain((0..BANDED_MIPS).flat_map(|mip| {
-                (0..bands_in_mip(mip) as u8).map(move |band| Segment::Band { mip, band })
-            }))
+            .chain(
+                (0..BANDED_MIPS)
+                    .flat_map(|mip| (0..bands_in_mip(mip) as u8).map(move |band| Segment::Band { mip, band })),
+            )
             .chain(std::iter::once(Segment::Tail))
     }
 
@@ -159,10 +163,7 @@ pub fn header() -> [u8; HEADER_LEN as usize] {
     let mut put = |idx: usize, v: u32| h[idx..idx + 4].copy_from_slice(&v.to_le_bytes());
     put(0, u32::from_le_bytes(*b"DDS "));
     put(4, 124); // dwSize
-    put(
-        8,
-        DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT | DDSD_MIPMAPCOUNT | DDSD_LINEARSIZE,
-    );
+    put(8, DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT | DDSD_MIPMAPCOUNT | DDSD_LINEARSIZE);
     put(12, DIM); // height
     put(16, DIM); // width
     put(20, mip_len(0) as u32); // linear size of the top level

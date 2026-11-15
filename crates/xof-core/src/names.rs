@@ -218,10 +218,7 @@ pub fn ter_contents(ter: &TerName, p: &TerParams) -> String {
     } else if ter.kind == TerKind::Sea {
         let border = 4096 >> (t.zl.saturating_sub(p.mask_zl));
         s.push_str(&format!("LOAD_CENTER_BORDER {lat:.5} {lon:.5} {size} {border}\n"));
-        s.push_str(&format!(
-            "BORDER_TEX ../textures/{}\n",
-            MaskName::for_texture(t).file_name()
-        ));
+        s.push_str(&format!("BORDER_TEX ../textures/{}\n", MaskName::for_texture(t).file_name()));
     }
     if ter.kind != TerKind::Water && p.decal {
         s.push_str("DECAL_LIB lib/g10/decals/maquify_2_green_key.dcl\n");

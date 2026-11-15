@@ -53,7 +53,8 @@ impl<S: tracing::Subscriber> Layer<S> for EventLayer {
         }
         let mut v = V(String::new());
         event.record(&mut v);
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+        let now =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
         let _ = self.0.send(Event::Log(LogLine { level: meta.level().to_string(), message: v.0, unix_time: now }));
     }
 }

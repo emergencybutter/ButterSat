@@ -63,7 +63,9 @@ async fn serve(root: PathBuf) -> String {
                 let path = req.split_whitespace().nth(1).unwrap_or("/").trim_start_matches('/').to_string();
                 let resp = match std::fs::read(root.join(&path)) {
                     Ok(body) => {
-                        let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+                        let mut r =
+                            format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len())
+                                .into_bytes();
                         r.extend_from_slice(&body);
                         r
                     }
@@ -77,7 +79,13 @@ async fn serve(root: PathBuf) -> String {
 }
 
 /// Publish a catalog of `tiles` into `root/v1`.
-fn publish(root: &Path, key: &SigningKey, version: &str, tiles: &[(DsfTile, Vec<u8>)], mask: Option<&[u8]>) -> Manifest {
+fn publish(
+    root: &Path,
+    key: &SigningKey,
+    version: &str,
+    tiles: &[(DsfTile, Vec<u8>)],
+    mask: Option<&[u8]>,
+) -> Manifest {
     let v1 = root.join("v1");
     let mut m = Manifest::empty();
     m.catalog_version = version.into();
@@ -99,7 +107,10 @@ fn publish(root: &Path, key: &SigningKey, version: &str, tiles: &[(DsfTile, Vec<
         m.tiles.insert(
             t.name(),
             TileEntry {
-                dsf: DsfEntry { object: Object { object: obj, size: z.len() as u64, blake3: hash }, stripped_size: data.len() as u64 },
+                dsf: DsfEntry {
+                    object: Object { object: obj, size: z.len() as u64, blake3: hash },
+                    stripped_size: data.len() as u64,
+                },
                 masks,
                 zl: ZoomInfo { base: 16, airports: Some(17) },
             },

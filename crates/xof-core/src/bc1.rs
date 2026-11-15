@@ -8,12 +8,7 @@ use crate::raster::Rgba;
 /// of 4 are edge-padded first (as for the 2×2 and 1×1 mips).
 pub fn encode(img: &Rgba) -> Vec<u8> {
     let img = img.pad_to_block();
-    let surface = RgbaSurface {
-        width: img.width,
-        height: img.height,
-        stride: img.width * 4,
-        data: &img.data,
-    };
+    let surface = RgbaSurface { width: img.width, height: img.height, stride: img.width * 4, data: &img.data };
     bc1::compress_blocks(&surface)
 }
 

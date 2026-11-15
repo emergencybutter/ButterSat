@@ -40,7 +40,12 @@ pub struct Prefetcher {
 }
 
 impl Prefetcher {
-    pub fn spawn(cfg: PrefetchConfig, engine: TextureEngine, mesh: Option<Arc<MeshStreamer>>, aircraft: watch::Receiver<Option<AircraftState>>) -> Arc<Self> {
+    pub fn spawn(
+        cfg: PrefetchConfig,
+        engine: TextureEngine,
+        mesh: Option<Arc<MeshStreamer>>,
+        aircraft: watch::Receiver<Option<AircraftState>>,
+    ) -> Arc<Self> {
         let (tx, rx) = mpsc::unbounded_channel();
         let this = Arc::new(Self {
             cfg: Mutex::new(cfg),
@@ -162,7 +167,8 @@ impl Prefetcher {
     fn update_dynamic_zoom(&self, cfg: &PrefetchConfig, a: &AircraftState) {
         let agl_ft = a.agl_m * 3.28084;
         let on = self.reduced.load(Ordering::Relaxed);
-        let want = cfg.dynamic_zoom && if on { agl_ft > cfg.dynamic_zoom_agl_ft - 500.0 } else { agl_ft > cfg.dynamic_zoom_agl_ft + 500.0 };
+        let want = cfg.dynamic_zoom
+            && if on { agl_ft > cfg.dynamic_zoom_agl_ft - 500.0 } else { agl_ft > cfg.dynamic_zoom_agl_ft + 500.0 };
         if want != on {
             self.reduced.store(want, Ordering::Relaxed);
             self.engine.lock().set_reduced_zoom(want);

@@ -116,7 +116,8 @@ fn tile_dirs(inputs: &[PathBuf]) -> Vec<PathBuf> {
         if p.join("Earth nav data").is_dir() {
             out.push(p.clone());
         } else if let Ok(rd) = std::fs::read_dir(p) {
-            let mut v: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|q| q.join("Earth nav data").is_dir()).collect();
+            let mut v: Vec<PathBuf> =
+                rd.flatten().map(|e| e.path()).filter(|q| q.join("Earth nav data").is_dir()).collect();
             v.sort();
             out.extend(v);
         }
@@ -167,7 +168,17 @@ fn write_object(v1: &Path, rel: &str, data: &[u8]) -> anyhow::Result<()> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build(tiles: &[PathBuf], out: &Path, key: &Path, version: &str, mirrors: &[String], attribution: &[String], build_config: Option<&Path>, strip: bool, level: i32) -> anyhow::Result<()> {
+fn build(
+    tiles: &[PathBuf],
+    out: &Path,
+    key: &Path,
+    version: &str,
+    mirrors: &[String],
+    attribution: &[String],
+    build_config: Option<&Path>,
+    strip: bool,
+    level: i32,
+) -> anyhow::Result<()> {
     let key = read_key(key)?;
     let v1 = out.join("v1");
     std::fs::create_dir_all(&v1)?;
@@ -184,7 +195,11 @@ fn build(tiles: &[PathBuf], out: &Path, key: &Path, version: &str, mirrors: &[St
             let raw = std::fs::read(&path)?;
             anyhow::ensure!(dsf::md5_ok(&raw), "{}: bad DSF checksum", path.display());
             let data = if dsf::has_raster_data(&raw)? {
-                anyhow::ensure!(strip, "{}: contains raster data (Laminar layers); rebuild without Global Scenery or pass --strip-rasters", path.display());
+                anyhow::ensure!(
+                    strip,
+                    "{}: contains raster data (Laminar layers); rebuild without Global Scenery or pass --strip-rasters",
+                    path.display()
+                );
                 dsf::strip_rasters(&raw)?
             } else {
                 raw
@@ -202,17 +217,29 @@ fn build(tiles: &[PathBuf], out: &Path, key: &Path, version: &str, mirrors: &[St
                     let png = std::fs::read(e.path())?;
                     let (mobj, mhash) = catalog::object_name("masks", name.trim_end_matches(".png"), "png", &png);
                     write_object(&v1, &mobj, &png)?;
-                    masks.push(MaskEntry { name, object: Object { object: mobj, size: png.len() as u64, blake3: mhash } });
+                    masks.push(MaskEntry {
+                        name,
+                        object: Object { object: mobj, size: png.len() as u64, blake3: mhash },
+                    });
                 }
             }
             masks.sort_by(|a, b| a.name.cmp(&b.name));
             total_in += data.len() as u64;
             total_out += z.len() as u64;
-            println!("{}  {:>6.1} MB -> {:>6.1} MB  ({} masks)", tile, data.len() as f64 / 1e6, z.len() as f64 / 1e6, masks.len());
+            println!(
+                "{}  {:>6.1} MB -> {:>6.1} MB  ({} masks)",
+                tile,
+                data.len() as f64 / 1e6,
+                z.len() as f64 / 1e6,
+                masks.len()
+            );
             manifest.tiles.insert(
                 tile.name(),
                 TileEntry {
-                    dsf: DsfEntry { object: Object { object: obj, size: z.len() as u64, blake3: hash }, stripped_size: data.len() as u64 },
+                    dsf: DsfEntry {
+                        object: Object { object: obj, size: z.len() as u64, blake3: hash },
+                        stripped_size: data.len() as u64,
+                    },
                     masks,
                     zl: zoom_info(&dir),
                 },
@@ -227,7 +254,10 @@ fn build(tiles: &[PathBuf], out: &Path, key: &Path, version: &str, mirrors: &[St
     if !attribution.is_empty() {
         manifest.attribution = attribution.to_vec();
     } else if manifest.attribution.is_empty() {
-        manifest.attribution = vec!["Mesh data © OpenStreetMap contributors (ODbL)".into(), "Elevation: USGS 3DEP / Copernicus DEM".into()];
+        manifest.attribution = vec![
+            "Mesh data © OpenStreetMap contributors (ODbL)".into(),
+            "Elevation: USGS 3DEP / Copernicus DEM".into(),
+        ];
     }
     if let Some(cfg) = build_config {
         manifest.build_config = format!("blake3:{}", blake3::hash(&std::fs::read(cfg)?).to_hex());
@@ -310,7 +340,13 @@ async fn upload_s3(v1: &Path, endpoint: &str, bucket: &str, region: &str, prefix
         let cache = if immutable { "public, max-age=31536000, immutable" } else { "public, max-age=300" };
         action.headers_mut().insert("cache-control", cache);
         let url = action.sign(ttl);
-        http.put(url).header("cache-control", cache).body(data).send().await?.error_for_status().with_context(|| format!("PUT {obj_key}"))?;
+        http.put(url)
+            .header("cache-control", cache)
+            .body(data)
+            .send()
+            .await?
+            .error_for_status()
+            .with_context(|| format!("PUT {obj_key}"))?;
         sent += 1;
         println!("uploaded {obj_key}");
     }
@@ -340,14 +376,17 @@ fn upload_dir(v1: &Path, dest: &Path) -> anyhow::Result<()> {
 async fn verify(origin: &str, pubkey: &str, sample: usize) -> anyhow::Result<()> {
     let key = catalog::parse_public_key(pubkey)?;
     let http = reqwest::Client::new();
-    let zst = http.get(catalog::join_url(origin, catalog::MANIFEST_FILE)).send().await?.error_for_status()?.bytes().await?;
-    let sig = http.get(catalog::join_url(origin, catalog::SIGNATURE_FILE)).send().await?.error_for_status()?.text().await?;
+    let zst =
+        http.get(catalog::join_url(origin, catalog::MANIFEST_FILE)).send().await?.error_for_status()?.bytes().await?;
+    let sig =
+        http.get(catalog::join_url(origin, catalog::SIGNATURE_FILE)).send().await?.error_for_status()?.text().await?;
     catalog::verify(&[key], &zst, &sig)?;
     let m = Manifest::from_zst(&zst)?;
     println!("signature OK — catalog {} ({} tiles, generated {})", m.catalog_version, m.tiles.len(), m.generated_at);
     let objs: BTreeMap<&String, &TileEntry> = m.tiles.iter().take(sample).collect();
     for (name, e) in objs {
-        let d = http.get(catalog::join_url(origin, &e.dsf.object.object)).send().await?.error_for_status()?.bytes().await?;
+        let d =
+            http.get(catalog::join_url(origin, &e.dsf.object.object)).send().await?.error_for_status()?.bytes().await?;
         anyhow::ensure!(blake3::hash(&d).to_hex().as_str() == e.dsf.object.blake3, "{name}: hash mismatch");
         let raw = zstd::decode_all(&d[..])?;
         anyhow::ensure!(raw.len() as u64 == e.dsf.stripped_size && !dsf::has_raster_data(&raw)?, "{name}: bad content");
@@ -380,7 +419,16 @@ async fn main() -> anyhow::Result<()> {
             anyhow::ensure!(v1.join(catalog::MANIFEST_FILE).exists(), "{} has no built catalog", dir.display());
             match target {
                 Target::Dir => upload_dir(&v1, &dest.context("--dest required")?)?,
-                Target::S3 => upload_s3(&v1, &endpoint.context("--endpoint required")?, &bucket.context("--bucket required")?, &region, &prefix).await?,
+                Target::S3 => {
+                    upload_s3(
+                        &v1,
+                        &endpoint.context("--endpoint required")?,
+                        &bucket.context("--bucket required")?,
+                        &region,
+                        &prefix,
+                    )
+                    .await?
+                }
             }
         }
         Cmd::Verify { origin, pubkey, sample } => verify(&origin, &pubkey, sample).await?,

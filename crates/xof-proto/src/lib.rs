@@ -249,10 +249,7 @@ pub fn socket_path() -> std::path::PathBuf {
     if cfg!(target_os = "macos") {
         dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("xporthofs").join("daemon.sock")
     } else {
-        dirs::runtime_dir()
-            .or_else(dirs::cache_dir)
-            .unwrap_or_else(std::env::temp_dir)
-            .join("xporthofs.sock")
+        dirs::runtime_dir().or_else(dirs::cache_dir).unwrap_or_else(std::env::temp_dir).join("xporthofs.sock")
     }
 }
 
@@ -304,7 +301,12 @@ impl Client {
     /// Call a method and decode its result.
     pub async fn call<P: Serialize, R: DeserializeOwned>(&self, method: &str, params: P) -> anyhow::Result<R> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let req = RpcRequest { jsonrpc: JSONRPC.into(), id: Some(id), method: method.into(), params: serde_json::to_value(params)? };
+        let req = RpcRequest {
+            jsonrpc: JSONRPC.into(),
+            id: Some(id),
+            method: method.into(),
+            params: serde_json::to_value(params)?,
+        };
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
         let mut line = serde_json::to_vec(&req)?;

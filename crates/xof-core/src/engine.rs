@@ -12,13 +12,13 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
+use crate::bc1;
 use crate::cache::{ByteLru, TileStore};
 use crate::dds::{self, Segment};
 use crate::names::TextureId;
 use crate::provider::{decode_tile, Fetched, Fetcher, Priority, Provider};
 use crate::raster::{placeholder_tile, Rgba, Tile};
 use crate::tile::{TileCoord, TILE_PX};
-use crate::bc1;
 
 /// Engine tuning.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -132,10 +132,8 @@ pub struct TextureEngine {
 impl TextureEngine {
     pub fn new(cfg: EngineConfig, provider: Arc<dyn Provider>, store: Arc<TileStore>) -> anyhow::Result<Self> {
         let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).saturating_sub(1).max(1);
-        let cpu = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .thread_name(|i| format!("xof-cpu-{i}"))
-            .build()?;
+        let cpu =
+            rayon::ThreadPoolBuilder::new().num_threads(threads).thread_name(|i| format!("xof-cpu-{i}")).build()?;
         Ok(Self {
             inner: Arc::new(Inner {
                 segs: ByteLru::new(cfg.segment_ram_mb << 20),
@@ -230,10 +228,7 @@ impl TextureEngine {
     pub async fn warm_tile(&self, t: TileCoord) -> bool {
         let provider = self.provider().id().to_string();
         let store = self.inner.store.clone();
-        let cached = tokio::task::spawn_blocking(move || store.get(&provider, t).ok().flatten())
-            .await
-            .ok()
-            .flatten();
+        let cached = tokio::task::spawn_blocking(move || store.get(&provider, t).ok().flatten()).await.ok().flatten();
         if cached.is_some() {
             return true;
         }
@@ -430,10 +425,7 @@ impl TextureEngine {
         }
         let provider = self.provider().id().to_string();
         let store = self.inner.store.clone();
-        let cached = tokio::task::spawn_blocking(move || store.get(&provider, t).ok().flatten())
-            .await
-            .ok()
-            .flatten();
+        let cached = tokio::task::spawn_blocking(move || store.get(&provider, t).ok().flatten()).await.ok().flatten();
         let fetched = match cached {
             Some(f) => f,
             None if allow_net => match self.inner.fetcher.fetch(t, prio).await {

@@ -69,7 +69,11 @@ async fn handle_conn(app: Arc<App>, conn: interprocess::local_socket::tokio::Str
                     loop {
                         match rx.recv().await {
                             Ok(ev) => {
-                                let n = RpcNotification { jsonrpc: JSONRPC.into(), method: method::EVENT.into(), params: ev };
+                                let n = RpcNotification {
+                                    jsonrpc: JSONRPC.into(),
+                                    method: method::EVENT.into(),
+                                    params: ev,
+                                };
                                 if send_line(&w2, &n).await.is_err() {
                                     break;
                                 }

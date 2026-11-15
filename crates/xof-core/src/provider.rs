@@ -82,15 +82,10 @@ impl Provider for Bing {
     }
     fn tile_url(&self, t: TileCoord) -> String {
         let server = (t.x + t.y) % 4;
-        format!(
-            "https://ecn.t{server}.tiles.virtualearth.net/tiles/a{}.jpeg?g=136",
-            t.quadkey()
-        )
+        format!("https://ecn.t{server}.tiles.virtualearth.net/tiles/a{}.jpeg?g=136", t.quadkey())
     }
     fn is_no_data(&self, status: u16, h: &reqwest::header::HeaderMap, body: &[u8]) -> bool {
-        status == 404
-            || body.is_empty()
-            || h.get("X-VE-Tile-Info").is_some_and(|v| v.as_bytes() == b"no-tile")
+        status == 404 || body.is_empty() || h.get("X-VE-Tile-Info").is_some_and(|v| v.as_bytes() == b"no-tile")
     }
 }
 
@@ -141,7 +136,9 @@ pub struct Fetcher {
     /// Background requests also take one here, so they can never use all
     /// permits and starve live reads.
     background: Arc<Semaphore>,
-    inflight: Mutex<HashMap<TileCoord, futures::future::Shared<futures::future::BoxFuture<'static, Result<Fetched, String>>>>>,
+    inflight: Mutex<
+        HashMap<TileCoord, futures::future::Shared<futures::future::BoxFuture<'static, Result<Fetched, String>>>>,
+    >,
     pub stats: Arc<FetchStats>,
     retries: u32,
 }

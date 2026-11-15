@@ -136,7 +136,13 @@ pub struct PrefetchConfig {
 
 impl Default for PrefetchConfig {
     fn default() -> Self {
-        Self { enabled: true, mesh_radius: 1, lookahead_minutes: 8.0, dynamic_zoom: true, dynamic_zoom_agl_ft: 12_000.0 }
+        Self {
+            enabled: true,
+            mesh_radius: 1,
+            lookahead_minutes: 8.0,
+            dynamic_zoom: true,
+            dynamic_zoom_agl_ft: 12_000.0,
+        }
     }
 }
 

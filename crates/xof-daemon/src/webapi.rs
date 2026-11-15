@@ -44,7 +44,8 @@ async fn resolve_ids(http: &reqwest::Client, port: u16) -> anyhow::Result<HashMa
     let mut ids = HashMap::new();
     for (i, name) in DATAREFS.iter().enumerate() {
         let url = format!("http://127.0.0.1:{port}/api/v2/datarefs");
-        let v: Value = http.get(&url).query(&[("filter[name]", *name)]).send().await?.error_for_status()?.json().await?;
+        let v: Value =
+            http.get(&url).query(&[("filter[name]", *name)]).send().await?.error_for_status()?.json().await?;
         let id = v["data"]
             .as_array()
             .and_then(|a| a.iter().find(|d| d["name"] == *name))
@@ -55,7 +56,11 @@ async fn resolve_ids(http: &reqwest::Client, port: u16) -> anyhow::Result<HashMa
     Ok(ids)
 }
 
-async fn session(port: u16, atx: &watch::Sender<Option<AircraftState>>, ctx: &watch::Sender<bool>) -> anyhow::Result<()> {
+async fn session(
+    port: u16,
+    atx: &watch::Sender<Option<AircraftState>>,
+    ctx: &watch::Sender<bool>,
+) -> anyhow::Result<()> {
     let http = reqwest::Client::builder().timeout(Duration::from_secs(5)).build()?;
     let ids = resolve_ids(&http, port).await?;
     let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}/api/v2")).await?;
@@ -88,7 +93,10 @@ async fn session(port: u16, atx: &watch::Sender<Option<AircraftState>>, ctx: &wa
             }
         }
         if values[0].is_finite() && values[1].is_finite() {
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(0.0);
             let _ = atx.send(Some(AircraftState {
                 lat: values[0],
                 lon: values[1],

@@ -81,7 +81,9 @@ pub fn insert_pack_entry(ini: &str) -> Option<String> {
         return Some(out.join("\n") + "\n");
     }
     let is_ortho_or_mesh = |l: &str| {
-        let Some(path) = l.trim().strip_prefix("SCENERY_PACK ").or_else(|| l.trim().strip_prefix("SCENERY_PACK_DISABLED ")) else {
+        let Some(path) =
+            l.trim().strip_prefix("SCENERY_PACK ").or_else(|| l.trim().strip_prefix("SCENERY_PACK_DISABLED "))
+        else {
             return false;
         };
         let name = path.trim_end_matches('/').rsplit('/').next().unwrap_or("").to_ascii_lowercase();
@@ -136,7 +138,8 @@ mod tests {
         let ini = "I\n1000 Version\nSCENERY\n\nSCENERY_PACK *GLOBAL_AIRPORTS*\n\n";
         let out = insert_pack_entry(ini).unwrap();
         assert!(out.trim_end().ends_with("SCENERY_PACK Custom Scenery/z_xporthofs/"));
-        let disabled = out.replace("SCENERY_PACK Custom Scenery/z_xporthofs/", "SCENERY_PACK_DISABLED Custom Scenery/z_xporthofs/");
+        let disabled = out
+            .replace("SCENERY_PACK Custom Scenery/z_xporthofs/", "SCENERY_PACK_DISABLED Custom Scenery/z_xporthofs/");
         let re = insert_pack_entry(&disabled).unwrap();
         assert_eq!(re.matches("z_xporthofs").count(), 1);
         assert!(re.contains("SCENERY_PACK Custom Scenery/z_xporthofs/"));

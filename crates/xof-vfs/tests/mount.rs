@@ -41,7 +41,9 @@ impl Provider for Mock {
 fn png() -> Vec<u8> {
     let img = image::RgbaImage::from_pixel(256, 256, image::Rgba([90, 120, 60, 255]));
     let mut buf = Vec::new();
-    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png).unwrap();
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+        .unwrap();
     buf
 }
 
@@ -59,10 +61,13 @@ async fn serve(root: PathBuf) -> String {
                 let n = s.read(&mut buf).await.unwrap_or(0);
                 let req = String::from_utf8_lossy(&buf[..n]).to_string();
                 let path = req.split_whitespace().nth(1).unwrap_or("/").trim_start_matches('/').to_string();
-                let body = if path.starts_with("tiles/") { Some(tile.to_vec()) } else { std::fs::read(root.join(&path)).ok() };
+                let body =
+                    if path.starts_with("tiles/") { Some(tile.to_vec()) } else { std::fs::read(root.join(&path)).ok() };
                 let resp = match body {
                     Some(b) => {
-                        let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", b.len()).into_bytes();
+                        let mut r =
+                            format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", b.len())
+                                .into_bytes();
                         r.extend_from_slice(&b);
                         r
                     }
@@ -106,7 +111,10 @@ fn publish(root: &Path, key: &SigningKey, t: DsfTile, dsf: &[u8]) {
     m.tiles.insert(
         t.name(),
         TileEntry {
-            dsf: DsfEntry { object: Object { object: obj, size: z.len() as u64, blake3: hash }, stripped_size: dsf.len() as u64 },
+            dsf: DsfEntry {
+                object: Object { object: obj, size: z.len() as u64, blake3: hash },
+                stripped_size: dsf.len() as u64,
+            },
             masks: vec![],
             zl: ZoomInfo { base: 16, airports: None },
         },
@@ -151,7 +159,8 @@ fn mount_and_read_through_os() {
     let store = TileStore::open(&work.path().join("tiles.redb")).unwrap();
     let engine = {
         let _g = rt.enter();
-        TextureEngine::new(EngineConfig { deadline_ms: 10_000, ..Default::default() }, Arc::new(Mock(base)), store).unwrap()
+        TextureEngine::new(EngineConfig { deadline_ms: 10_000, ..Default::default() }, Arc::new(Mock(base)), store)
+            .unwrap()
     };
     // Treat this test binary as "X-Plane" so it may trigger downloads.
     let me = std::env::current_exe().unwrap();
@@ -166,10 +175,14 @@ fn mount_and_read_through_os() {
     let mounted = xof_vfs::mount(scenery, &mnt).expect("mount");
 
     // Root listing.
-    let mut names: Vec<String> = std::fs::read_dir(&mnt).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    let mut names: Vec<String> =
+        std::fs::read_dir(&mnt).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
     names.sort();
     assert_eq!(names, ["Earth nav data", "library.txt", "terrain", "textures"]);
-    let mut folders: Vec<String> = std::fs::read_dir(mnt.join("Earth nav data")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    let mut folders: Vec<String> = std::fs::read_dir(mnt.join("Earth nav data"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
     folders.sort();
     assert_eq!(folders, ["+40-080", "+50+000"]);
 

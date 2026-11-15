@@ -81,7 +81,9 @@ fn set_path(v: &mut Value, key: &str, val: &str) -> anyhow::Result<()> {
     *slot = match slot {
         Value::Bool(_) => Value::Bool(val.parse()?),
         Value::Number(_) => serde_json::from_str(val)?,
-        Value::Array(_) => Value::Array(val.split(',').filter(|s| !s.is_empty()).map(|s| Value::String(s.trim().into())).collect()),
+        Value::Array(_) => {
+            Value::Array(val.split(',').filter(|s| !s.is_empty()).map(|s| Value::String(s.trim().into())).collect())
+        }
         _ if val.is_empty() || val == "none" => Value::Null,
         _ => Value::String(val.into()),
     };
@@ -97,9 +99,18 @@ fn print_status(s: &Status) {
     println!("  X-Plane:     {}", s.xplane.as_ref().map(|x| x.path.as_str()).unwrap_or("not found"));
     println!("  sim:         {}", if s.sim_connected { "connected" } else { "not running" });
     if let Some(a) = &s.aircraft {
-        println!("  aircraft:    {:.4} {:.4}  {:.0} kt  {:.0} ft AGL", a.lat, a.lon, a.groundspeed_ms * 1.943_84, a.agl_m * 3.280_84);
+        println!(
+            "  aircraft:    {:.4} {:.4}  {:.0} kt  {:.0} ft AGL",
+            a.lat,
+            a.lon,
+            a.groundspeed_ms * 1.943_84,
+            a.agl_m * 3.280_84
+        );
     }
-    println!("  imagery:     {}  reads {}  tiles fetched {}  degraded {}  upgrades {}", s.provider, s.engine.reads, s.engine.fetch_requests, s.engine.degraded_built, s.engine.upgrades);
+    println!(
+        "  imagery:     {}  reads {}  tiles fetched {}  degraded {}  upgrades {}",
+        s.provider, s.engine.reads, s.engine.fetch_requests, s.engine.degraded_built, s.engine.upgrades
+    );
     if let Some(m) = &s.mesh {
         println!(
             "  mesh:        catalog {} ({} tiles, {}){}  downloads {}",
@@ -110,10 +121,22 @@ fn print_status(s: &Status) {
             m.downloads
         );
     }
-    println!("  prefetch:    queued {}  mesh {}  imagery {}{}", s.prefetch.queued, s.prefetch.mesh_tiles_done, s.prefetch.imagery_tiles_done, if s.prefetch.reduced_zoom { "  (dynamic zoom: reduced)" } else { "" });
+    println!(
+        "  prefetch:    queued {}  mesh {}  imagery {}{}",
+        s.prefetch.queued,
+        s.prefetch.mesh_tiles_done,
+        s.prefetch.imagery_tiles_done,
+        if s.prefetch.reduced_zoom { "  (dynamic zoom: reduced)" } else { "" }
+    );
 }
 
-async fn run_standalone(pack: Vec<PathBuf>, mount: PathBuf, provider: String, deadline_ms: u64, cache: Option<PathBuf>) -> anyhow::Result<()> {
+async fn run_standalone(
+    pack: Vec<PathBuf>,
+    mount: PathBuf,
+    provider: String,
+    deadline_ms: u64,
+    cache: Option<PathBuf>,
+) -> anyhow::Result<()> {
     use xof_core::cache::TileStore;
     use xof_core::engine::{EngineConfig, TextureEngine};
     let p = xof_core::provider::builtin(&provider).ok_or_else(|| anyhow::anyhow!("unknown provider {provider}"))?;
@@ -144,7 +167,14 @@ async fn run_standalone(pack: Vec<PathBuf>, mount: PathBuf, provider: String, de
         loop {
             tick.tick().await;
             let s = e.stats();
-            eprintln!("reads {}  fetched {} ({} MB)  degraded {}  upgrades {}", s.reads, s.fetch_requests, s.fetch_bytes >> 20, s.degraded_built, s.upgrades);
+            eprintln!(
+                "reads {}  fetched {} ({} MB)  degraded {}  upgrades {}",
+                s.reads,
+                s.fetch_requests,
+                s.fetch_bytes >> 20,
+                s.degraded_built,
+                s.upgrades
+            );
         }
     });
     tokio::signal::ctrl_c().await?;
@@ -157,7 +187,9 @@ async fn run_standalone(pack: Vec<PathBuf>, mount: PathBuf, provider: String, de
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     if let Cmd::Run { pack, mount, provider, deadline_ms, cache } = cli.cmd {
-        tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())).init();
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+            .init();
         return run_standalone(pack, mount, provider, deadline_ms, cache).await;
     }
     let c = Client::connect().await.map_err(|e| anyhow::anyhow!("cannot reach xof-daemon ({e}); is it running?"))?;
@@ -208,7 +240,13 @@ async fn main() -> anyhow::Result<()> {
         }
         Cmd::Cache => {
             let s: CacheStats = c.call(method::CACHE_STATS, Value::Null).await?;
-            println!("imagery: {} MB / {} GB ({} tiles, {} areas)", s.imagery_bytes >> 20, s.imagery_cap_bytes >> 30, s.imagery_tiles, s.areas.len());
+            println!(
+                "imagery: {} MB / {} GB ({} tiles, {} areas)",
+                s.imagery_bytes >> 20,
+                s.imagery_cap_bytes >> 30,
+                s.imagery_tiles,
+                s.areas.len()
+            );
             println!("mesh:    {} MB / {} GB", s.mesh_bytes >> 20, s.mesh_cap_bytes >> 30);
         }
         Cmd::CatalogRefresh => {
@@ -217,7 +255,14 @@ async fn main() -> anyhow::Result<()> {
         }
         Cmd::Prepare { icao } => {
             let r: PrepareResult = c.call(method::PREPARE_DEPARTURE, json!({ "icao": icao })).await?;
-            println!("{} ({:.4}, {:.4}): queued {} mesh tiles, {} imagery tiles", r.name.unwrap_or_default(), r.lat, r.lon, r.mesh_tiles, r.imagery_tiles);
+            println!(
+                "{} ({:.4}, {:.4}): queued {} mesh tiles, {} imagery tiles",
+                r.name.unwrap_or_default(),
+                r.lat,
+                r.lon,
+                r.mesh_tiles,
+                r.imagery_tiles
+            );
         }
         Cmd::Route { simbrief_user } => {
             let r: Value = c.call(method::PREFETCH_ROUTE, json!({ "simbrief_user": simbrief_user })).await?;

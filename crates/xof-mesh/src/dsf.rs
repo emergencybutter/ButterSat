@@ -5,7 +5,6 @@
 //! 8-byte header) + payload`. We only ever touch two atoms: `DEFN/DEMN` (raster
 //! layer names) and the top-level `DEMS` (raster headers + data).
 
-
 use std::path::Path;
 
 use md5::{Digest, Md5};
@@ -312,7 +311,12 @@ pub(crate) mod tests {
     }
 
     pub fn stripped() -> Vec<u8> {
-        make_dsf(&[(*b"DAEH", b"props".to_vec()), (DEFN, defn(b"")), (*b"DOEG", vec![1, 2, 3]), (*b"SDMC", vec![9; 10])])
+        make_dsf(&[
+            (*b"DAEH", b"props".to_vec()),
+            (DEFN, defn(b"")),
+            (*b"DOEG", vec![1, 2, 3]),
+            (*b"SDMC", vec![9; 10]),
+        ])
     }
 
     pub fn global(elev: i16, bathy: i16) -> Vec<u8> {

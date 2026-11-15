@@ -15,7 +15,10 @@ use xof_core::names::TerParams;
 use xof_core::{provider, DsfTile};
 use xof_mesh::{MeshConfig, MeshStreamer};
 use xof_proto::config::{DaemonConfig, Dirs, DEFAULT_MESH_KEYS};
-use xof_proto::{method, CacheStats, EvictArea, Event, HealthCheck, HealthReport, PackInfo, PrepareDeparture, PrepareResult, Severity, Status, XPlaneInfo};
+use xof_proto::{
+    method, CacheStats, Event, EvictArea, HealthCheck, HealthReport, PackInfo, PrepareDeparture, PrepareResult,
+    Severity, Status, XPlaneInfo,
+};
 use xof_vfs::{Scenery, SceneryConfig};
 
 use crate::prefetch::Prefetcher;
@@ -70,7 +73,13 @@ pub fn imported_packs(dirs: &Dirs, cfg: &DaemonConfig) -> Vec<PathBuf> {
     v
 }
 
-fn build_stack(dirs: &Dirs, cfg: &DaemonConfig, store: Arc<TileStore>, xp: Option<&Path>, rt: &tokio::runtime::Handle) -> anyhow::Result<Stack> {
+fn build_stack(
+    dirs: &Dirs,
+    cfg: &DaemonConfig,
+    store: Arc<TileStore>,
+    xp: Option<&Path>,
+    rt: &tokio::runtime::Handle,
+) -> anyhow::Result<Stack> {
     let provider = provider::builtin(&cfg.imagery.provider)
         .ok_or_else(|| anyhow::anyhow!("unknown imagery provider '{}'", cfg.imagery.provider))?;
     let engine = {
@@ -124,7 +133,8 @@ impl App {
         let stack = build_stack(&dirs, &cfg, store.clone(), xp.as_deref(), &rt)?;
         let port = if cfg.xplane.web_api_port == 0 { 8086 } else { cfg.xplane.web_api_port };
         let web = crate::webapi::spawn(port);
-        let prefetch = Prefetcher::spawn(cfg.prefetch.clone(), stack.engine.clone(), stack.mesh.clone(), web.aircraft.clone());
+        let prefetch =
+            Prefetcher::spawn(cfg.prefetch.clone(), stack.engine.clone(), stack.mesh.clone(), web.aircraft.clone());
         let (events, _) = broadcast::channel(512);
         let (shutdown, _) = watch::channel(false);
         Ok(Arc::new(Self {
@@ -163,7 +173,9 @@ impl App {
             return self.mount_point().ok_or_else(|| anyhow::anyhow!("no mount point"));
         }
         let res = (|| {
-            let mp = self.mount_point().ok_or_else(|| anyhow::anyhow!("X-Plane 12 not found and no mount path configured"))?;
+            let mp = self
+                .mount_point()
+                .ok_or_else(|| anyhow::anyhow!("X-Plane 12 not found and no mount path configured"))?;
             prepare_mount_point(&mp)?;
             let scenery = self.stack.lock().scenery.clone();
             let m = xof_vfs::mount(scenery, &mp)?;
@@ -215,7 +227,13 @@ impl App {
     pub fn health(&self) -> HealthReport {
         let mut checks = Vec::new();
         let mut add = |id: &str, title: &str, severity: Severity, message: String, fix: Option<&str>| {
-            checks.push(HealthCheck { id: id.into(), title: title.into(), severity, message, fix: fix.map(str::to_string) });
+            checks.push(HealthCheck {
+                id: id.into(),
+                title: title.into(),
+                severity,
+                message,
+                fix: fix.map(str::to_string),
+            });
         };
         let driver = xof_vfs::driver_name();
         if xof_vfs::driver_available() {
@@ -235,47 +253,123 @@ impl App {
             Some(p) => {
                 add("xplane", "X-Plane 12", Severity::Ok, format!("Found at {}", p.display()), None);
                 match xplane::global_scenery(p) {
-                    Some(_) => add("global_scenery", "Global Scenery", Severity::Ok, "Installed (used for water and season data)".into(), None),
-                    None => add("global_scenery", "Global Scenery", Severity::Warn, "Not found: meshes will lack X-Plane's water depth and season layers".into(), Some("Install X-Plane 12's global scenery for your region.")),
+                    Some(_) => add(
+                        "global_scenery",
+                        "Global Scenery",
+                        Severity::Ok,
+                        "Installed (used for water and season data)".into(),
+                        None,
+                    ),
+                    None => add(
+                        "global_scenery",
+                        "Global Scenery",
+                        Severity::Warn,
+                        "Not found: meshes will lack X-Plane's water depth and season layers".into(),
+                        Some("Install X-Plane 12's global scenery for your region."),
+                    ),
                 }
                 let ini = p.join("Custom Scenery/scenery_packs.ini");
-                let ok = std::fs::read_to_string(&ini).map(|s| xplane::insert_pack_entry(&s).is_none()).unwrap_or(false);
+                let ok =
+                    std::fs::read_to_string(&ini).map(|s| xplane::insert_pack_entry(&s).is_none()).unwrap_or(false);
                 if ok {
                     add("scenery_packs", "scenery_packs.ini", Severity::Ok, "xporthofs entry present".into(), None);
                 } else {
-                    add("scenery_packs", "scenery_packs.ini", Severity::Info, "Entry will be added when the scenery is mounted (or by X-Plane on next start)".into(), None);
+                    add(
+                        "scenery_packs",
+                        "scenery_packs.ini",
+                        Severity::Info,
+                        "Entry will be added when the scenery is mounted (or by X-Plane on next start)".into(),
+                        None,
+                    );
                 }
             }
-            None => add("xplane", "X-Plane 12", Severity::Error, "Not found".into(), Some("Start X-Plane 12 once so it records its location, or set the path in Settings.")),
+            None => add(
+                "xplane",
+                "X-Plane 12",
+                Severity::Error,
+                "Not found".into(),
+                Some("Start X-Plane 12 once so it records its location, or set the path in Settings."),
+            ),
         }
         if self.is_mounted() {
-            add("mount", "Scenery mount", Severity::Ok, format!("Mounted at {}", self.mount_point().map(|p| p.display().to_string()).unwrap_or_default()), None);
+            add(
+                "mount",
+                "Scenery mount",
+                Severity::Ok,
+                format!("Mounted at {}", self.mount_point().map(|p| p.display().to_string()).unwrap_or_default()),
+                None,
+            );
         } else {
             let msg = self.mount_error.lock().clone().unwrap_or_else(|| "Not mounted".into());
-            add("mount", "Scenery mount", Severity::Warn, msg, Some("Use Mount in the app; X-Plane must be restarted to see newly mounted scenery."));
+            add(
+                "mount",
+                "Scenery mount",
+                Severity::Warn,
+                msg,
+                Some("Use Mount in the app; X-Plane must be restarted to see newly mounted scenery."),
+            );
         }
         if *self.web.connected.borrow() {
             add("web_api", "X-Plane Web API", Severity::Ok, "Connected (prefetch active)".into(), None);
         } else {
-            add("web_api", "X-Plane Web API", Severity::Info, "X-Plane is not running or its Web API is disabled; prefetch is idle".into(), Some("Start X-Plane 12 (Web API is on by default, port 8086)."));
+            add(
+                "web_api",
+                "X-Plane Web API",
+                Severity::Info,
+                "X-Plane is not running or its Web API is disabled; prefetch is idle".into(),
+                Some("Start X-Plane 12 (Web API is on by default, port 8086)."),
+            );
         }
         let cfg = self.cfg.lock().clone();
         if cfg.mesh.enabled {
             if trusted_keys(&cfg).is_empty() {
-                add("catalog", "Mesh catalog", Severity::Warn, "No trusted catalog signing key configured: streamed meshes are disabled".into(), Some("Add the catalog's public key under [mesh].public_keys in config.toml."));
+                add(
+                    "catalog",
+                    "Mesh catalog",
+                    Severity::Warn,
+                    "No trusted catalog signing key configured: streamed meshes are disabled".into(),
+                    Some("Add the catalog's public key under [mesh].public_keys in config.toml."),
+                );
             } else if let Some(m) = &self.stack.lock().mesh {
                 let s = m.status();
                 if s.online {
-                    add("catalog", "Mesh catalog", Severity::Ok, format!("Catalog {} ({} tiles)", s.catalog_version, s.tiles_in_catalog), None);
+                    add(
+                        "catalog",
+                        "Mesh catalog",
+                        Severity::Ok,
+                        format!("Catalog {} ({} tiles)", s.catalog_version, s.tiles_in_catalog),
+                        None,
+                    );
                 } else if s.tiles_in_catalog > 0 {
-                    add("catalog", "Mesh catalog", Severity::Warn, format!("Offline: using cached catalog {} ({} cached tiles listed)", s.catalog_version, s.tiles_listed), None);
+                    add(
+                        "catalog",
+                        "Mesh catalog",
+                        Severity::Warn,
+                        format!(
+                            "Offline: using cached catalog {} ({} cached tiles listed)",
+                            s.catalog_version, s.tiles_listed
+                        ),
+                        None,
+                    );
                 } else {
-                    add("catalog", "Mesh catalog", Severity::Warn, "Catalog unreachable and nothing cached".into(), Some("Check your internet connection."));
+                    add(
+                        "catalog",
+                        "Mesh catalog",
+                        Severity::Warn,
+                        "Catalog unreachable and nothing cached".into(),
+                        Some("Check your internet connection."),
+                    );
                 }
             }
         }
         if !cfg.imagery.provider_notice_accepted {
-            add("provider", "Imagery provider", Severity::Info, format!("Using {} — review its terms of use in Settings", cfg.imagery.provider), None);
+            add(
+                "provider",
+                "Imagery provider",
+                Severity::Info,
+                format!("Using {} — review its terms of use in Settings", cfg.imagery.provider),
+                None,
+            );
         }
         if cfg!(windows) {
             add("defender", "Windows Defender", Severity::Info, "Excluding the mount and cache folders from real-time scanning avoids needless downloads".into(), Some("The installer offers this; or add the folders under Windows Security → Virus & threat protection → Exclusions."));
@@ -368,7 +462,10 @@ impl App {
         let internal = |e: anyhow::Error| (-32000, format!("{e:#}"));
         let bad = |e: serde_json::Error| (-32602, format!("invalid params: {e}"));
         let blocking = |f: Box<dyn FnOnce() -> anyhow::Result<Value> + Send>| async move {
-            tokio::task::spawn_blocking(f).await.map_err(|e| (-32000, e.to_string()))?.map_err(|e| (-32000, format!("{e:#}")))
+            tokio::task::spawn_blocking(f)
+                .await
+                .map_err(|e| (-32000, e.to_string()))?
+                .map_err(|e| (-32000, format!("{e:#}")))
         };
         match method_name {
             method::STATUS => Ok(json!(self.status())),
@@ -397,8 +494,14 @@ impl App {
                 *self.cfg.lock() = new;
                 if sim_running && self.is_mounted() {
                     // Don't pull the scenery from under a running simulator.
-                    self.prefetch.reconfigure(self.config().prefetch, self.stack.lock().engine.clone(), self.stack.lock().mesh.clone());
-                    return Ok(json!({ "applied": false, "note": "Saved. Imagery/mesh changes apply after X-Plane exits." }));
+                    self.prefetch.reconfigure(
+                        self.config().prefetch,
+                        self.stack.lock().engine.clone(),
+                        self.stack.lock().mesh.clone(),
+                    );
+                    return Ok(
+                        json!({ "applied": false, "note": "Saved. Imagery/mesh changes apply after X-Plane exits." }),
+                    );
                 }
                 let this = self.clone();
                 blocking(Box::new(move || {
@@ -423,7 +526,12 @@ impl App {
                     mesh.map(|m| {
                         m.listed_tiles()
                             .into_iter()
-                            .map(|t| xof_proto::CatalogTile { tile: t.name(), lat: t.lat, lon: t.lon, ready: m.is_dsf_ready(t) })
+                            .map(|t| xof_proto::CatalogTile {
+                                tile: t.name(),
+                                lat: t.lat,
+                                lon: t.lon,
+                                ready: m.is_dsf_ready(t),
+                            })
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default()
@@ -494,7 +602,10 @@ impl App {
                 let dest_root = self.dirs.packs();
                 let this = self.clone();
                 blocking(Box::new(move || {
-                    anyhow::ensure!(src.join("Earth nav data").is_dir(), "not an X-Plane scenery pack (no 'Earth nav data')");
+                    anyhow::ensure!(
+                        src.join("Earth nav data").is_dir(),
+                        "not an X-Plane scenery pack (no 'Earth nav data')"
+                    );
                     let name = src.file_name().ok_or_else(|| anyhow::anyhow!("bad path"))?;
                     let dest = dest_root.join(name);
                     anyhow::ensure!(!dest.exists(), "a pack with that name is already imported");

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyOpen, ReplyStatfs,
-    Request,
+    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyOpen,
+    ReplyStatfs, Request,
 };
 use parking_lot::Mutex;
 use xof_core::engine::ReaderClass;
@@ -26,9 +26,7 @@ pub fn available() -> bool {
     } else {
         // The pure-Rust mount needs the setuid fusermount helper.
         let in_path = |bin: &str| {
-            std::env::var_os("PATH")
-                .map(|p| std::env::split_paths(&p).any(|d| d.join(bin).exists()))
-                .unwrap_or(false)
+            std::env::var_os("PATH").map(|p| std::env::split_paths(&p).any(|d| d.join(bin).exists())).unwrap_or(false)
         };
         Path::new("/dev/fuse").exists() && (in_path("fusermount3") || in_path("fusermount"))
     }
@@ -186,7 +184,8 @@ impl Filesystem for FuseFs {
 
     fn readdir(&mut self, _req: &Request<'_>, ino: u64, _fh: u64, offset: i64, mut reply: ReplyDirectory) {
         let Some(dir) = self.path(ino) else { return reply.error(libc::ENOENT) };
-        let mut entries: Vec<(u64, FileType, String)> = vec![(ino, FileType::Directory, ".".into()), (ROOT, FileType::Directory, "..".into())];
+        let mut entries: Vec<(u64, FileType, String)> =
+            vec![(ino, FileType::Directory, ".".into()), (ROOT, FileType::Directory, "..".into())];
         for (name, node) in self.scenery.list(&dir) {
             let child = normalize(&format!("{dir}/{name}"));
             let child_ino = self.inodes.lock().get_or_insert(&child);

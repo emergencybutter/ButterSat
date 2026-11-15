@@ -6,8 +6,12 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{STATUS_END_OF_FILE, STATUS_INVALID_DEVICE_REQUEST, STATUS_OBJECT_NAME_NOT_FOUND, STATUS_UNEXPECTED_IO_ERROR};
-use winfsp::filesystem::{DirBuffer, DirInfo, DirMarker, FileInfo, FileSecurity, FileSystemContext, OpenFileInfo, VolumeInfo, WideNameInfo};
+use windows::Win32::Foundation::{
+    STATUS_END_OF_FILE, STATUS_INVALID_DEVICE_REQUEST, STATUS_OBJECT_NAME_NOT_FOUND, STATUS_UNEXPECTED_IO_ERROR,
+};
+use winfsp::filesystem::{
+    DirBuffer, DirInfo, DirMarker, FileInfo, FileSecurity, FileSystemContext, OpenFileInfo, VolumeInfo, WideNameInfo,
+};
 use winfsp::host::{FileSystemHost, VolumeParams};
 use winfsp::U16CStr;
 use xof_core::engine::ReaderClass;
@@ -93,13 +97,20 @@ struct Security(Vec<u8>);
 impl Security {
     fn new() -> anyhow::Result<Self> {
         use windows::Win32::Foundation::{LocalFree, HLOCAL};
-        use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
+        use windows::Win32::Security::Authorization::{
+            ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+        };
         use windows::Win32::Security::PSECURITY_DESCRIPTOR;
         let sddl: Vec<u16> = "O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;WD)\0".encode_utf16().collect();
         let mut psd = PSECURITY_DESCRIPTOR::default();
         let mut len = 0u32;
         unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(PCWSTR(sddl.as_ptr()), SDDL_REVISION_1, &mut psd, Some(&mut len))?;
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                PCWSTR(sddl.as_ptr()),
+                SDDL_REVISION_1,
+                &mut psd,
+                Some(&mut len),
+            )?;
             let bytes = std::slice::from_raw_parts(psd.0 as *const u8, len as usize).to_vec();
             let _ = LocalFree(Some(HLOCAL(psd.0)));
             Ok(Self(bytes))
@@ -191,7 +202,11 @@ impl FileSystemContext for WinFs {
         Ok(())
     }
 
-    fn get_security(&self, _context: &Self::FileContext, security_descriptor: Option<&mut [c_void]>) -> winfsp::Result<u64> {
+    fn get_security(
+        &self,
+        _context: &Self::FileContext,
+        security_descriptor: Option<&mut [c_void]>,
+    ) -> winfsp::Result<u64> {
         Ok(self.security.copy_to(security_descriptor))
     }
 
@@ -280,7 +295,8 @@ impl Mount {
             .filesystem_name("xporthofs");
         let classifier = ProcessClassifier::new(scenery.xplane_processes());
         let fs = WinFs { scenery, classifier, security: Security::new()? };
-        let mut host: FileSystemHost<WinFs, winfsp::host::FineGuard> = FileSystemHost::new(vp, fs).map_err(|e| anyhow::anyhow!("WinFsp host: {e:?}"))?;
+        let mut host: FileSystemHost<WinFs, winfsp::host::FineGuard> =
+            FileSystemHost::new(vp, fs).map_err(|e| anyhow::anyhow!("WinFsp host: {e:?}"))?;
         host.mount(mount_point.as_os_str()).map_err(|e| anyhow::anyhow!("mount {}: {e:?}", mount_point.display()))?;
         let threads = std::thread::available_parallelism().map(|n| n.get() as u32 * 2).unwrap_or(16).max(16);
         host.start_with_threads(threads).map_err(|e| anyhow::anyhow!("WinFsp dispatcher: {e:?}"))?;

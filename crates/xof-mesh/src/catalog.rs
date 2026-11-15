@@ -131,9 +131,8 @@ pub fn verify(keys: &[VerifyingKey], manifest_zst: &[u8], sig_b64: &str) -> anyh
 }
 
 pub fn parse_public_key(hex_str: &str) -> anyhow::Result<VerifyingKey> {
-    let bytes: [u8; 32] = hex::decode(hex_str.trim())?
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("public key must be 32 bytes"))?;
+    let bytes: [u8; 32] =
+        hex::decode(hex_str.trim())?.try_into().map_err(|_| anyhow::anyhow!("public key must be 32 bytes"))?;
     Ok(VerifyingKey::from_bytes(&bytes)?)
 }
 
@@ -216,7 +215,11 @@ impl CatalogClient {
         Err(last_err)
     }
 
-    async fn fetch_from(&self, base: &str, etag: Option<&str>) -> anyhow::Result<Option<(Vec<u8>, String, Option<String>)>> {
+    async fn fetch_from(
+        &self,
+        base: &str,
+        etag: Option<&str>,
+    ) -> anyhow::Result<Option<(Vec<u8>, String, Option<String>)>> {
         let mut req = self.http.get(join_url(base, MANIFEST_FILE));
         if let Some(e) = etag {
             req = req.header(reqwest::header::IF_NONE_MATCH, e);
@@ -267,7 +270,11 @@ mod tests {
             "+40-074".into(),
             TileEntry {
                 dsf: DsfEntry {
-                    object: Object { object: "tiles/+40-080/+40-074.abc.dsf.zst".into(), size: 10, blake3: "00".into() },
+                    object: Object {
+                        object: "tiles/+40-080/+40-074.abc.dsf.zst".into(),
+                        size: 10,
+                        blake3: "00".into(),
+                    },
                     stripped_size: 42_987_139,
                 },
                 masks: vec![],

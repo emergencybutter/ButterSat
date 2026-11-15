@@ -291,16 +291,15 @@ impl MeshStreamer {
         if let Some(r) = self.rasters_lru.lock().get(&t) {
             return r;
         }
-        let r = self
-            .gs_path(t)
-            .filter(|p| p.exists())
-            .and_then(|p| match dsf::read_dsf_file(&p).and_then(|d| dsf::extract_rasters(&d)) {
+        let r = self.gs_path(t).filter(|p| p.exists()).and_then(|p| {
+            match dsf::read_dsf_file(&p).and_then(|d| dsf::extract_rasters(&d)) {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::warn!("Global Scenery {}: {e}", p.display());
                     None
                 }
-            });
+            }
+        });
         let r = Arc::new(r);
         self.rasters_lru.lock().put(t, r.clone());
         r
@@ -472,12 +471,7 @@ impl MeshStreamer {
         }
         let pinned_hashes: HashSet<String> = {
             let m = self.manifest();
-            self.cfg
-                .pinned
-                .iter()
-                .filter_map(|t| m.tile(*t))
-                .map(|e| e.dsf.object.blake3[..16].to_string())
-                .collect()
+            self.cfg.pinned.iter().filter_map(|t| m.tile(*t)).map(|e| e.dsf.object.blake3[..16].to_string()).collect()
         };
         let mut total: u64 = files.iter().map(|f| f.1).sum();
         files.sort_by_key(|f| f.2);
@@ -519,9 +513,7 @@ fn touch(p: &Path) {
 }
 
 fn dir_size(p: &Path) -> u64 {
-    std::fs::read_dir(p)
-        .map(|rd| rd.flatten().filter_map(|f| f.metadata().ok()).map(|m| m.len()).sum())
-        .unwrap_or(0)
+    std::fs::read_dir(p).map(|rd| rd.flatten().filter_map(|f| f.metadata().ok()).map(|m| m.len()).sum()).unwrap_or(0)
 }
 
 async fn read_range(path: &Path, off: u64, len: u64) -> std::io::Result<Vec<u8>> {
