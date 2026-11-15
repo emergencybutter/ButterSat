@@ -530,8 +530,8 @@ impl App {
                 let this_tiles = tokio::task::spawn_blocking(move || {
                     mesh.map(|m| {
                         m.listed_tiles()
-                            .into_iter()
-                            .map(|t| xof_proto::CatalogTile {
+                            .iter()
+                            .map(|&t| xof_proto::CatalogTile {
                                 tile: t.name(),
                                 lat: t.lat,
                                 lon: t.lon,

@@ -153,9 +153,8 @@ async fn download_splice_and_sizes() {
     let base = serve(origin.path().to_path_buf()).await;
     let ms = streamer(cache.path(), Some(gs_root.path().to_path_buf()), vec![base], &key);
     assert!(ms.refresh().await.unwrap());
-    let mut listed = ms.listed_tiles();
-    listed.sort();
-    assert_eq!(listed, vec![DsfTile::new(40, -74), DsfTile::new(41, -74)]);
+    let listed = ms.listed_tiles(); // sorted
+    assert_eq!(*listed, vec![DsfTile::new(40, -74), DsfTile::new(41, -74)]);
 
     // Advertised size before any download includes the local rasters.
     let size = ms.dsf_size(t).unwrap();
@@ -196,7 +195,7 @@ async fn offline_lists_only_cached_and_updates_are_deferred() {
     // Restart offline (unreachable mirror): cached manifest, only `a` listed.
     let ms = streamer(cache.path(), None, vec!["http://127.0.0.1:9/v1".into()], &key);
     assert!(ms.refresh().await.is_err());
-    assert_eq!(ms.listed_tiles(), vec![a]);
+    assert_eq!(*ms.listed_tiles(), vec![a]);
     assert_eq!(ms.read_dsf(a, 0, 8).await.unwrap(), b"XPLNEDSF");
 
     // Online with a new catalog version: kept pending until promoted.

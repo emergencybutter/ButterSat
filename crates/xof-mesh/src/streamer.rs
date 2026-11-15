@@ -95,6 +95,8 @@ pub struct MeshStreamer {
     rasters_lru: Mutex<lru_lite::Lru<DsfTile, Arc<Option<Rasters>>>>,
     inflight: Mutex<HashMap<DsfTile, EnsureFuture>>,
     pub stats: MeshStats,
+    /// Cached result of `listed_tiles` (invalidated on catalog/online/cache changes).
+    listed: RwLock<Option<Arc<Vec<DsfTile>>>>,
 }
 
 mod lru_lite {
@@ -157,6 +159,7 @@ impl MeshStreamer {
             rasters_lru: Mutex::new(lru_lite::Lru::new(6)),
             inflight: Mutex::new(HashMap::new()),
             stats: MeshStats::default(),
+            listed: RwLock::new(None),
         });
         if let Some(m) = this.client.load_cached() {
             this.set_active(Arc::new(m));
@@ -173,6 +176,7 @@ impl MeshStreamer {
         }
         *self.masks_by_name.write() = masks;
         *self.active.write() = m;
+        self.invalidate_listing();
     }
 
     pub fn manifest(&self) -> Arc<Manifest> {
@@ -202,7 +206,7 @@ impl MeshStreamer {
         }
         match self.client.refresh(&mirrors).await {
             Ok(Refresh::Updated(m)) => {
-                self.online.store(true, Ordering::Relaxed);
+                self.set_online(true);
                 let m = Arc::new(m);
                 let is_first = self.active.read().tiles.is_empty();
                 if is_first {
@@ -213,11 +217,11 @@ impl MeshStreamer {
                 Ok(true)
             }
             Ok(Refresh::Unchanged) => {
-                self.online.store(true, Ordering::Relaxed);
+                self.set_online(true);
                 Ok(false)
             }
             Err(e) => {
-                self.online.store(false, Ordering::Relaxed);
+                self.set_online(false);
                 Err(e)
             }
         }
@@ -238,7 +242,32 @@ impl MeshStreamer {
 
     /// Tiles to present in `Earth nav data`. Offline, only tiles we can serve
     /// without the network.
-    pub fn listed_tiles(&self) -> Vec<DsfTile> {
+    fn set_online(&self, on: bool) {
+        if self.online.swap(on, Ordering::Relaxed) != on {
+            self.invalidate_listing();
+        }
+    }
+
+    fn invalidate_listing(&self) {
+        *self.listed.write() = None;
+    }
+
+    /// Tiles to present (cached; cheap to call on every lookup).
+    pub fn listed_tiles(&self) -> Arc<Vec<DsfTile>> {
+        if let Some(l) = self.listed.read().clone() {
+            return l;
+        }
+        let l = Arc::new(self.compute_listed());
+        *self.listed.write() = Some(l.clone());
+        l
+    }
+
+    /// Is `t` currently presented?
+    pub fn is_listed(&self, t: DsfTile) -> bool {
+        self.listed_tiles().binary_search(&t).is_ok()
+    }
+
+    fn compute_listed(&self) -> Vec<DsfTile> {
         let m = self.manifest();
         let online = self.is_online();
         m.tiles
@@ -247,6 +276,8 @@ impl MeshStreamer {
             .filter(|(t, _)| self.cfg.coverage.contains(*t))
             .filter(|(t, e)| online || self.is_cached(*t, e))
             .map(|(t, _)| t)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
             .collect()
     }
 
@@ -392,6 +423,9 @@ impl MeshStreamer {
             };
             anyhow::ensure!(final_bytes.len() as u64 == expected, "spliced size differs from advertised size");
             write_atomic(&out2, &final_bytes)?;
+            if !this.is_online() {
+                this.invalidate_listing();
+            }
             Ok(())
         })
         .await??;

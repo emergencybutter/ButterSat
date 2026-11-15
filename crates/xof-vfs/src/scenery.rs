@@ -184,7 +184,7 @@ impl Scenery {
             return None;
         }
         mesh.entry(t)?;
-        mesh.listed_tiles().contains(&t).then_some(t)
+        mesh.is_listed(t).then_some(t)
     }
 
     /// Resolve a mount-relative path.
@@ -237,7 +237,7 @@ impl Scenery {
     fn list_dsf_folders(&self) -> Vec<String> {
         let mut set = std::collections::BTreeSet::new();
         if let Some(m) = &self.mesh {
-            for t in m.listed_tiles() {
+            for t in m.listed_tiles().iter() {
                 set.insert(t.folder());
             }
         }
@@ -287,7 +287,7 @@ impl Scenery {
             }
         } else if let Some(folder) = lower.strip_prefix("earth nav data/") {
             if let Some(m) = &self.mesh {
-                for t in m.listed_tiles() {
+                for &t in m.listed_tiles().iter() {
                     if t.folder().eq_ignore_ascii_case(folder) {
                         out.insert(format!("{}.dsf", t.name()), Node::Dsf(t));
                     }
