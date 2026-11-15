@@ -153,6 +153,9 @@ pub struct CatalogClient {
     http: reqwest::Client,
     keys: Vec<VerifyingKey>,
     cache_dir: PathBuf,
+    /// The mirror that last served us: tried first, so a dead mirror early
+    /// in the list costs one failure, not one per object.
+    preferred: std::sync::Mutex<Option<String>>,
 }
 
 /// Outcome of a refresh.
@@ -170,7 +173,28 @@ impl CatalogClient {
             .user_agent(concat!("xporthofs/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(60))
             .build()?;
-        Ok(Self { http, keys, cache_dir: cache_dir.to_path_buf() })
+        Ok(Self { http, keys, cache_dir: cache_dir.to_path_buf(), preferred: Default::default() })
+    }
+
+    /// `mirrors` with the last good one first.
+    fn ordered(&self, mirrors: &[String]) -> Vec<String> {
+        let mut v = mirrors.to_vec();
+        if let Some(p) = self.preferred.lock().unwrap().as_ref() {
+            if let Some(i) = v.iter().position(|m| m == p) {
+                let m = v.remove(i);
+                v.insert(0, m);
+            }
+        }
+        v
+    }
+
+    fn mark(&self, base: &str, ok: bool) {
+        let mut p = self.preferred.lock().unwrap();
+        if ok {
+            *p = Some(base.to_string());
+        } else if p.as_deref() == Some(base) {
+            *p = None;
+        }
     }
 
     pub fn http(&self) -> &reqwest::Client {
@@ -190,10 +214,14 @@ impl CatalogClient {
         let etag_path = self.cache_dir.join("manifest.etag");
         let etag = std::fs::read_to_string(&etag_path).ok();
         let mut last_err = anyhow::anyhow!("no mirrors configured");
-        for base in mirrors {
+        for base in &self.ordered(mirrors) {
             match self.fetch_from(base, etag.as_deref()).await {
-                Ok(None) => return Ok(Refresh::Unchanged),
+                Ok(None) => {
+                    self.mark(base, true);
+                    return Ok(Refresh::Unchanged);
+                }
                 Ok(Some((zst, sig, new_etag))) => {
+                    self.mark(base, true);
                     verify(&self.keys, &zst, &sig)?;
                     let m = Manifest::from_zst(&zst)?;
                     std::fs::write(self.cache_dir.join(MANIFEST_FILE), &zst)?;
@@ -208,6 +236,7 @@ impl CatalogClient {
                 }
                 Err(e) => {
                     tracing::warn!("catalog mirror {base} failed: {e}");
+                    self.mark(base, false);
                     last_err = e;
                 }
             }
@@ -238,7 +267,7 @@ impl CatalogClient {
     /// Download an object from the first mirror that has it, verifying BLAKE3.
     pub async fn fetch_object(&self, mirrors: &[String], obj: &Object) -> anyhow::Result<Vec<u8>> {
         let mut last_err = anyhow::anyhow!("no mirrors configured");
-        for base in mirrors {
+        for base in &self.ordered(mirrors) {
             let res: anyhow::Result<Vec<u8>> = async {
                 let data = self.http.get(join_url(base, &obj.object)).send().await?.error_for_status()?.bytes().await?;
                 anyhow::ensure!(data.len() as u64 == obj.size, "size mismatch for {}", obj.object);
@@ -248,9 +277,13 @@ impl CatalogClient {
             }
             .await;
             match res {
-                Ok(d) => return Ok(d),
+                Ok(d) => {
+                    self.mark(base, true);
+                    return Ok(d);
+                }
                 Err(e) => {
                     tracing::warn!("object {} from {base}: {e}", obj.object);
+                    self.mark(base, false);
                     last_err = e;
                 }
             }
@@ -262,6 +295,25 @@ impl CatalogClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn last_good_mirror_goes_first() {
+        let dir = std::env::temp_dir().join(format!("xof-catalog-order-{}", std::process::id()));
+        let c = CatalogClient::new(vec![], &dir).unwrap();
+        let m: Vec<String> = ["http://dead/v1", "http://live/v1", "http://other/v1"].map(String::from).to_vec();
+        assert_eq!(c.ordered(&m), m, "configured order until something works");
+        c.mark("http://dead/v1", false);
+        c.mark("http://live/v1", true);
+        assert_eq!(c.ordered(&m)[0], "http://live/v1");
+        assert_eq!(c.ordered(&m)[1..], ["http://dead/v1".to_string(), "http://other/v1".to_string()]);
+        // A failure of the preferred mirror resets to the configured order.
+        c.mark("http://live/v1", false);
+        assert_eq!(c.ordered(&m), m);
+        // A preferred mirror absent from the list is ignored.
+        c.mark("http://gone/v1", true);
+        assert_eq!(c.ordered(&m), m);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     fn sample() -> Manifest {
         let mut m = Manifest::empty();
