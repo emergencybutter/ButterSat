@@ -24,7 +24,13 @@ pub fn available() -> bool {
     if cfg!(target_os = "macos") {
         Path::new("/Library/Filesystems/macfuse.fs").exists()
     } else {
-        Path::new("/dev/fuse").exists()
+        // The pure-Rust mount needs the setuid fusermount helper.
+        let in_path = |bin: &str| {
+            std::env::var_os("PATH")
+                .map(|p| std::env::split_paths(&p).any(|d| d.join(bin).exists()))
+                .unwrap_or(false)
+        };
+        Path::new("/dev/fuse").exists() && (in_path("fusermount3") || in_path("fusermount"))
     }
 }
 
