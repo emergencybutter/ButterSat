@@ -1,4 +1,4 @@
-// xporthofs control UI. Talks to the daemon through the Tauri `rpc` command
+// ButterSat control UI. Talks to the daemon through the Tauri `rpc` command
 // and receives pushed `daemon-event`s (stats, aircraft, logs, health).
 "use strict";
 
@@ -329,7 +329,7 @@ async function refresh() {
   } catch (e) {
     pill("pill-daemon", "err", "daemon offline");
     $("banner").classList.remove("hidden");
-    $("banner").textContent = "Cannot reach the xporthofs daemon: " + e;
+    $("banner").textContent = "Cannot reach the ButterSat daemon: " + e;
   }
 }
 

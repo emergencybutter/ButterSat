@@ -58,7 +58,7 @@ pub fn default_mount_point(xp: &Path) -> PathBuf {
     xp.join("Custom Scenery").join(PACK_NAME)
 }
 
-pub const PACK_NAME: &str = "z_xporthofs";
+pub const PACK_NAME: &str = "z_buttersat";
 
 /// Insert our pack into `scenery_packs.ini` text. Returns `None` when no
 /// change is needed. Placement: above the first ortho/mesh pack (anything
@@ -133,7 +133,7 @@ pub fn ensure_scenery_pack(xp: &Path) -> anyhow::Result<bool> {
     let Ok(text) = std::fs::read_to_string(&ini) else { return Ok(false) };
     let Some(new) = insert_pack_entry(&text) else { return Ok(false) };
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    std::fs::copy(&ini, ini.with_file_name(format!("scenery_packs.ini.xporthofs-{stamp}.bak")))?;
+    std::fs::copy(&ini, ini.with_file_name(format!("scenery_packs.ini.buttersat-{stamp}.bak")))?;
     let tmp = ini.with_extension("ini.tmp");
     std::fs::write(&tmp, new)?;
     std::fs::rename(tmp, &ini)?;
@@ -161,12 +161,12 @@ mod tests {
     fn appends_when_no_ortho_and_reenables() {
         let ini = "I\n1000 Version\nSCENERY\n\nSCENERY_PACK *GLOBAL_AIRPORTS*\n\n";
         let out = insert_pack_entry(ini).unwrap();
-        assert!(out.trim_end().ends_with("SCENERY_PACK Custom Scenery/z_xporthofs/"));
+        assert!(out.trim_end().ends_with("SCENERY_PACK Custom Scenery/z_buttersat/"));
         let disabled = out
-            .replace("SCENERY_PACK Custom Scenery/z_xporthofs/", "SCENERY_PACK_DISABLED Custom Scenery/z_xporthofs/");
+            .replace("SCENERY_PACK Custom Scenery/z_buttersat/", "SCENERY_PACK_DISABLED Custom Scenery/z_buttersat/");
         let re = insert_pack_entry(&disabled).unwrap();
-        assert_eq!(re.matches("z_xporthofs").count(), 1);
-        assert!(re.contains("SCENERY_PACK Custom Scenery/z_xporthofs/"));
+        assert_eq!(re.matches("z_buttersat").count(), 1);
+        assert!(re.contains("SCENERY_PACK Custom Scenery/z_buttersat/"));
     }
 
     #[test]

@@ -79,7 +79,7 @@ pub struct Variant {
     pub name: String,
     #[serde(default)]
     pub description: String,
-    /// Mount xporthofs for this variant.
+    /// Mount ButterSat for this variant.
     #[serde(default)]
     pub xof: bool,
     /// Static scenery packs (folders) linked into Custom Scenery.

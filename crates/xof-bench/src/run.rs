@@ -36,7 +36,7 @@ fn log(msg: impl AsRef<str>) {
 pub async fn run(sc: &Scenario, variants: &[Variant], opts: &RunOpts, run_dir: &Path) -> anyhow::Result<RunRecord> {
     anyhow::ensure!(
         !variants.iter().any(|v| v.xof) || !daemon::already_running().await,
-        "an xporthofs daemon is already running: quit it first (the bench starts its own)"
+        "a ButterSat daemon is already running: quit it first (the bench starts its own)"
     );
     std::fs::create_dir_all(run_dir)?;
     let xp = Arc::new(Xp::new(opts.port));

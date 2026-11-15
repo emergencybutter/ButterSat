@@ -1,4 +1,4 @@
-//! The xporthofs daemon under test: an isolated instance (own `XOF_HOME`)
+//! The ButterSat daemon under test: an isolated instance (own `XOF_HOME`)
 //! with a generated config, plus a throwaway HTTP origin for a local catalog.
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -15,7 +15,7 @@ pub struct Daemon {
     client: Client,
 }
 
-/// Is some xporthofs daemon already listening on this user's socket?
+/// Is some ButterSat daemon already listening on this user's socket?
 pub async fn already_running() -> bool {
     tokio::time::timeout(Duration::from_secs(2), Client::connect()).await.map(|r| r.is_ok()).unwrap_or(false)
 }

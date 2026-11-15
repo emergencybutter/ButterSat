@@ -1,6 +1,6 @@
 [package]
 name = "xof-core"
-description = "Tile math, DDS synthesis, imagery providers and caches for xporthofs"
+description = "Tile math, DDS synthesis, imagery providers and caches for ButterSat"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

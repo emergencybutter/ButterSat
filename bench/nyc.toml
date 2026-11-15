@@ -74,18 +74,18 @@ packs = ["../../xporthofs-build/Ortho4XP/Tiles/zOrtho4XP_+40-074"]
 
 [[variant]]
 name = "xof"
-description = "xporthofs, cold caches"
+description = "ButterSat, cold caches"
 xof = true
 
 [[variant]]
 name = "xof-warm"
-description = "xporthofs, persistent caches (warm from the second run)"
+description = "ButterSat, persistent caches (warm from the second run)"
 xof = true
 cache = "persistent"
 
 [[variant]]
 name = "xof-patient"
-description = "xporthofs, cold caches, 30 s read budget (never serve blurry bands)"
+description = "ButterSat, cold caches, 30 s read budget (never serve blurry bands)"
 xof = true
 [variant.config.imagery]
 deadline_ms = 30000

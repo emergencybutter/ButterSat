@@ -44,12 +44,12 @@ packs = ["../../xporthofs-build/Ortho4XP/Tiles/zOrtho4XP_+40-074"]
 
 [[variant]]
 name = "xof-load-patient"
-description = "xporthofs, cold: 20 s budget while X-Plane loads (new default)"
+description = "ButterSat, cold: 20 s budget while X-Plane loads (new default)"
 xof = true
 
 [[variant]]
 name = "xof-load-1200"
-description = "xporthofs, cold: 1.2 s budget during the load too (previous behaviour)"
+description = "ButterSat, cold: 1.2 s budget during the load too (previous behaviour)"
 xof = true
 [variant.config.imagery]
 loading_deadline_ms = 1200

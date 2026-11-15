@@ -1,8 +1,8 @@
-# xporthofs
+# ButterSat
 
 Streamed orthophoto scenery for **X-Plane 12** on Windows, Linux and macOS.
 
-xporthofs mounts a virtual scenery pack in `Custom Scenery`. When X-Plane
+ButterSat mounts a virtual scenery pack in `Custom Scenery`. When X-Plane
 reads it:
 
 - **meshes** (DSF) are downloaded on demand from a signed catalog, then
@@ -23,7 +23,7 @@ Nothing to pre-download: install, launch, fly. Design: [`docs/design.md`](docs/d
 | `xof-daemon` | background service: mount, prefetch, X-Plane Web API, IPC |
 | `xof-cli` | command-line control; `xof-cli run` for a standalone test mount |
 | `xof-publish` | build, sign and upload the mesh catalog |
-| `xof-ui` | Tauri control app (`xporthofs`) |
+| `xof-ui` | Tauri control app (`ButterSat`) |
 | `xof-bench` | automated in-sim A/B benchmark: drives X-Plane, slews between spots, scores nadir screenshots ([`docs/bench.md`](docs/bench.md)) |
 
 ## Requirements
@@ -57,7 +57,7 @@ xof-cli set imagery.provider bing
 xof-cli run --pack path/to/zOrtho4XP_+40-074 --mount X:/mnt   # standalone test mount
 ```
 
-Config lives in the per-user config dir (`xporthofs/config.toml`); every key
+Config lives in the per-user config dir (`ButterSat/config.toml`); every key
 has a working default. `XOF_HOME` relocates config, data and caches.
 
 ## Publishing a mesh catalog

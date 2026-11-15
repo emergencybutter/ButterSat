@@ -1,6 +1,6 @@
 [package]
 name = "xof-vfs"
-description = "Virtual scenery filesystem for xporthofs (WinFsp on Windows, FUSE on Linux/macOS)"
+description = "Virtual scenery filesystem for ButterSat (WinFsp on Windows, FUSE on Linux/macOS)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -53,7 +53,7 @@ Config (`xporthofs-build/Ortho4XP/Ortho4XP.cfg`): `skip_downloads=True`,
 - `.ter` contents are fully reproducible from the name; `xof-core` generates
   byte-identical files (golden tests).
 - Masks: `{row}_{col}_ZL{zl}.png` (no provider code), 1024 px at `mask_zl` 14.
-- `water_transition.png`: a 64×128 greyscale vertical ramp; xporthofs generates
+- `water_transition.png`: a 64×128 greyscale vertical ramp; ButterSat generates
   its own equivalent.
 - DDS: 4096², DXT1, 13 mips, 11,184,952 bytes; header flags identical to ours.
 

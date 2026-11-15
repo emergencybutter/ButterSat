@@ -1,4 +1,4 @@
-//! xof-bench: automated in-sim A/B benchmark for xporthofs.
+//! xof-bench: automated in-sim A/B benchmark for ButterSat.
 //!
 //! `xof-bench run bench/nyc.toml` launches X-Plane 12 once per variant,
 //! slews between the scenario's spots with the camera pointing straight down,

@@ -1,4 +1,4 @@
-//! xporthofs control UI (design §10). A pure control plane: all work happens
+//! ButterSat control UI (design §10). A pure control plane: all work happens
 //! in `xof-daemon`, which this app starts if it isn't running and talks to
 //! over the local IPC socket. Closing the window never unmounts.
 
@@ -119,5 +119,5 @@ fn main() {
         .manage(Conn::default())
         .invoke_handler(tauri::generate_handler![rpc, about])
         .run(tauri::generate_context!())
-        .expect("error while running xporthofs");
+        .expect("error while running ButterSat");
 }

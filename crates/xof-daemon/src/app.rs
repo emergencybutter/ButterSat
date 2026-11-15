@@ -242,7 +242,7 @@ impl App {
             add("driver", "Filesystem driver", Severity::Ok, format!("{driver} is installed"), None);
         } else {
             let fix = if cfg!(windows) {
-                "Reinstall xporthofs (the installer includes WinFsp)."
+                "Reinstall ButterSat (the installer includes WinFsp)."
             } else if cfg!(target_os = "macos") {
                 "Install macFUSE from https://macfuse.github.io (or `brew install --cask macfuse`), then restart."
             } else {
@@ -274,7 +274,7 @@ impl App {
                 let ok =
                     std::fs::read_to_string(&ini).map(|s| xplane::insert_pack_entry(&s).is_none()).unwrap_or(false);
                 if ok {
-                    add("scenery_packs", "scenery_packs.ini", Severity::Ok, "xporthofs entry present".into(), None);
+                    add("scenery_packs", "scenery_packs.ini", Severity::Ok, "ButterSat entry present".into(), None);
                 } else {
                     add(
                         "scenery_packs",

@@ -1,7 +1,7 @@
 # cargo-deny policy.
 #
 # Bundling WinFsp relies on its FLOSS exception, which requires that
-# xporthofs is not linked or distributed with proprietary software
+# ButterSat is not linked or distributed with proprietary software
 # (design §11.1). Every dependency must therefore be under an OSI/FSF
 # approved licence.
 

@@ -223,9 +223,9 @@ impl Mount {
             uid: unsafe { libc::getuid() },
             gid: unsafe { libc::getgid() },
         };
-        let mut opts = vec![MountOption::RO, MountOption::FSName("xporthofs".into()), MountOption::NoAtime];
+        let mut opts = vec![MountOption::RO, MountOption::FSName("ButterSat".into()), MountOption::NoAtime];
         if cfg!(target_os = "macos") {
-            for o in ["noappledouble", "noapplexattr", "nobrowse", "volname=xporthofs"] {
+            for o in ["noappledouble", "noapplexattr", "nobrowse", "volname=ButterSat"] {
                 opts.push(MountOption::CUSTOM(o.into()));
             }
         }

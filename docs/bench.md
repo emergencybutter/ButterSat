@@ -5,7 +5,7 @@ through the local Web API and compares scenery **variants** at a list of
 **spots**:
 
 1. For each variant: kill X-Plane, set up `scenery_packs.ini`, start an
-   isolated xporthofs daemon if the variant needs one, then launch X-Plane.
+   isolated ButterSat daemon if the variant needs one, then launch X-Plane.
 2. Start a flight at the first spot (`POST /api/v3/flight`, clear calm weather,
    fixed day and time) and freeze the aircraft (`override_planepath`).
 3. Point the camera straight down: pilot's head 4 m below the fuselage
@@ -42,7 +42,7 @@ only X-Plane's base scenery and global airports remain), `compare_to`.
 
 | key | meaning |
 |---|---|
-| `xof` | mount xporthofs (isolated `XOF_HOME`, bench-generated config) |
+| `xof` | mount ButterSat (isolated `XOF_HOME`, bench-generated config) |
 | `packs` | static scenery folders, linked into Custom Scenery as `z_xofbench_*` |
 | `cache` | `cold` (fresh caches every run) or `persistent` (`bench-runs/homes/<variant>`) |
 | `[variant.config]` | daemon config overrides, e.g. `[variant.config.imagery] deadline_ms = 600` |
@@ -75,7 +75,7 @@ only X-Plane's base scenery and global airports remain), `compare_to`.
 ## Caveats
 
 - Runs take over the machine: X-Plane is killed and relaunched per variant.
-  Don't run while flying. Close the xporthofs app first, since the bench runs
+  Don't run while flying. Close the ButterSat app first, since the bench runs
   its own daemon.
 - X-Plane plugins still run; notifications and traffic can appear in shots,
   which is one reason for the centre crop.

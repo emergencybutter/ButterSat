@@ -1,12 +1,12 @@
 [package]
 name = "xof-ui"
-description = "xporthofs control UI (Tauri)"
+description = "ButterSat control UI (Tauri)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "xporthofs"
+name = "buttersat"
 path = "src/main.rs"
 
 [build-dependencies]

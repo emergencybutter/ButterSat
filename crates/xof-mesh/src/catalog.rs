@@ -170,7 +170,7 @@ impl CatalogClient {
     pub fn new(keys: Vec<VerifyingKey>, cache_dir: &Path) -> anyhow::Result<Self> {
         std::fs::create_dir_all(cache_dir)?;
         let http = reqwest::Client::builder()
-            .user_agent(concat!("xporthofs/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("ButterSat/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(60))
             .build()?;
         Ok(Self { http, keys, cache_dir: cache_dir.to_path_buf(), preferred: Default::default() })

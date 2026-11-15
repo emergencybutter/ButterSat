@@ -1,6 +1,6 @@
 [package]
 name = "xof-publish"
-description = "Build, sign and upload the xporthofs mesh catalog"
+description = "Build, sign and upload the ButterSat mesh catalog"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

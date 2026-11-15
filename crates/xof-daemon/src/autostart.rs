@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const NAME: &str = "xporthofs";
+const NAME: &str = "ButterSat";
 
 fn daemon_exe() -> anyhow::Result<PathBuf> {
     Ok(std::env::current_exe()?)
@@ -42,7 +42,7 @@ fn disable() -> anyhow::Result<()> {
 
 #[cfg(target_os = "linux")]
 fn unit_path() -> anyhow::Result<PathBuf> {
-    Ok(dirs::config_dir().ok_or_else(|| anyhow::anyhow!("no config dir"))?.join("systemd/user/xporthofs.service"))
+    Ok(dirs::config_dir().ok_or_else(|| anyhow::anyhow!("no config dir"))?.join("systemd/user/buttersat.service"))
 }
 
 #[cfg(target_os = "linux")]
@@ -52,18 +52,18 @@ fn enable(exe: &Path) -> anyhow::Result<()> {
     std::fs::write(
         &p,
         format!(
-            "[Unit]\nDescription=xporthofs scenery streaming daemon\n\n[Service]\nExecStart=\"{}\"\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n",
+            "[Unit]\nDescription=ButterSat scenery streaming daemon\n\n[Service]\nExecStart=\"{}\"\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n",
             exe.display()
         ),
     )?;
     let _ = Command::new("systemctl").args(["--user", "daemon-reload"]).output();
-    let _ = Command::new("systemctl").args(["--user", "enable", "xporthofs.service"]).output();
+    let _ = Command::new("systemctl").args(["--user", "enable", "buttersat.service"]).output();
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
 fn disable() -> anyhow::Result<()> {
-    let _ = Command::new("systemctl").args(["--user", "disable", "xporthofs.service"]).output();
+    let _ = Command::new("systemctl").args(["--user", "disable", "buttersat.service"]).output();
     let p = unit_path()?;
     if p.exists() {
         std::fs::remove_file(p)?;
@@ -75,7 +75,7 @@ fn disable() -> anyhow::Result<()> {
 fn plist_path() -> anyhow::Result<PathBuf> {
     Ok(dirs::home_dir()
         .ok_or_else(|| anyhow::anyhow!("no home dir"))?
-        .join("Library/LaunchAgents/org.xporthofs.daemon.plist"))
+        .join("Library/LaunchAgents/org.buttersat.daemon.plist"))
 }
 
 #[cfg(target_os = "macos")]
@@ -85,7 +85,7 @@ fn enable(exe: &Path) -> anyhow::Result<()> {
     std::fs::write(
         &p,
         format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>Label</key><string>org.xporthofs.daemon</string>\n<key>ProgramArguments</key><array><string>{}</string></array>\n<key>RunAtLoad</key><true/>\n</dict></plist>\n",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>Label</key><string>org.buttersat.daemon</string>\n<key>ProgramArguments</key><array><string>{}</string></array>\n<key>RunAtLoad</key><true/>\n</dict></plist>\n",
             exe.display()
         ),
     )?;

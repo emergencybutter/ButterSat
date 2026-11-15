@@ -1,4 +1,4 @@
-//! IPC between the xporthofs daemon and its clients (UI, CLI): newline-
+//! IPC between the ButterSat daemon and its clients (UI, CLI): newline-
 //! delimited JSON-RPC 2.0 over a per-user local socket (design §12), plus the
 //! shared configuration and status types.
 
@@ -242,7 +242,7 @@ pub fn socket_name() -> std::io::Result<Name<'static>> {
     if cfg!(windows) {
         let user = std::env::var("USERNAME").unwrap_or_else(|_| "user".into());
         let clean: String = user.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
-        format!("xporthofs-{clean}").to_ns_name::<GenericNamespaced>().map(|n| n.into_owned())
+        format!("buttersat-{clean}").to_ns_name::<GenericNamespaced>().map(|n| n.into_owned())
     } else {
         socket_path().to_string_lossy().into_owned().to_fs_name::<GenericFilePath>().map(|n| n.into_owned())
     }
@@ -251,9 +251,9 @@ pub fn socket_name() -> std::io::Result<Name<'static>> {
 /// Socket file path on Unix (unused on Windows).
 pub fn socket_path() -> std::path::PathBuf {
     if cfg!(target_os = "macos") {
-        dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("xporthofs").join("daemon.sock")
+        dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("ButterSat").join("daemon.sock")
     } else {
-        dirs::runtime_dir().or_else(dirs::cache_dir).unwrap_or_else(std::env::temp_dir).join("xporthofs.sock")
+        dirs::runtime_dir().or_else(dirs::cache_dir).unwrap_or_else(std::env::temp_dir).join("buttersat.sock")
     }
 }
 

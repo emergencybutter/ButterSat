@@ -1,6 +1,6 @@
 [package]
 name = "xof-proto"
-description = "IPC protocol between the xporthofs daemon and its clients"
+description = "IPC protocol between the ButterSat daemon and its clients"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

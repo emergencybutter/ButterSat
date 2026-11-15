@@ -41,7 +41,7 @@ impl PackGuard {
     }
 
     /// Configure packs for a variant: link `packs`, enable them and (if `xof`)
-    /// our mount; disable the other bench packs, xporthofs when not under
+    /// our mount; disable the other bench packs, ButterSat when not under
     /// test, and `disable` (names, case-insensitive). With `isolate`, every
     /// other Custom Scenery pack is disabled too, including folders missing
     /// from the ini (X-Plane would add those enabled); `*GLOBAL_AIRPORTS*`
@@ -179,14 +179,14 @@ mod tests {
         let pack = root.join("refpack");
         std::fs::create_dir_all(&custom).unwrap();
         std::fs::create_dir_all(pack.join("Earth nav data")).unwrap();
-        let ini = "I\n1000 Version\nSCENERY\n\nSCENERY_PACK Custom Scenery/KJFK/\nSCENERY_PACK *GLOBAL_AIRPORTS*\nSCENERY_PACK Custom Scenery/nyc/\nSCENERY_PACK Custom Scenery/z_xporthofs/\nSCENERY_PACK Custom Scenery/zzz_mesh/\n";
+        let ini = "I\n1000 Version\nSCENERY\n\nSCENERY_PACK Custom Scenery/KJFK/\nSCENERY_PACK *GLOBAL_AIRPORTS*\nSCENERY_PACK Custom Scenery/nyc/\nSCENERY_PACK Custom Scenery/z_buttersat/\nSCENERY_PACK Custom Scenery/zzz_mesh/\n";
         std::fs::write(custom.join("scenery_packs.ini"), ini).unwrap();
         {
             let mut g = PackGuard::new(&root).unwrap();
             g.apply("ref", &[pack.clone()], false, &["NYC".into()], false).unwrap();
             let now = std::fs::read_to_string(custom.join("scenery_packs.ini")).unwrap();
             assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/nyc/"));
-            assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/z_xporthofs/"));
+            assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/z_buttersat/"));
             let lines: Vec<&str> = now.lines().collect();
             let ours = lines.iter().position(|l| *l == "SCENERY_PACK Custom Scenery/z_xofbench_ref_0/").unwrap();
             let mesh = lines.iter().position(|l| l.contains("zzz_mesh")).unwrap();
@@ -195,7 +195,7 @@ mod tests {
 
             g.apply("xof", &[], true, &[], false).unwrap();
             let now = std::fs::read_to_string(custom.join("scenery_packs.ini")).unwrap();
-            assert!(now.contains("SCENERY_PACK Custom Scenery/z_xporthofs/"));
+            assert!(now.contains("SCENERY_PACK Custom Scenery/z_buttersat/"));
             assert!(!custom.join("z_xofbench_ref_0").exists());
 
             // Isolation: everything else off, unlisted folders added disabled.
@@ -205,12 +205,12 @@ mod tests {
             assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/KJFK/"));
             assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/zzz_mesh/"));
             assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/Unlisted Pack/"));
-            assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/z_xporthofs/"));
+            assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/z_buttersat/"));
             assert!(now.contains("SCENERY_PACK *GLOBAL_AIRPORTS*"));
             assert!(now.contains("SCENERY_PACK Custom Scenery/z_xofbench_ref_0/"));
             g.apply("xof", &[], true, &[], true).unwrap();
             let now = std::fs::read_to_string(custom.join("scenery_packs.ini")).unwrap();
-            assert!(now.contains("SCENERY_PACK Custom Scenery/z_xporthofs/"));
+            assert!(now.contains("SCENERY_PACK Custom Scenery/z_buttersat/"));
             assert!(now.contains("SCENERY_PACK_DISABLED Custom Scenery/KJFK/"));
         }
         assert_eq!(std::fs::read_to_string(custom.join("scenery_packs.ini")).unwrap(), ini);

@@ -21,7 +21,7 @@ use xof_mesh::catalog::{self, DsfEntry, Manifest, MaskEntry, Object, TileEntry, 
 use xof_mesh::dsf;
 
 #[derive(Parser)]
-#[command(name = "xof-publish", version, about = "Build, sign and upload the xporthofs mesh catalog")]
+#[command(name = "xof-publish", version, about = "Build, sign and upload the ButterSat mesh catalog")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,

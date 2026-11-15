@@ -1,4 +1,4 @@
-//! xof-cli: control the xporthofs daemon, or run a standalone mount for
+//! xof-cli: control the ButterSat daemon, or run a standalone mount for
 //! testing (`xof-cli run`).
 
 use std::path::PathBuf;
@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use xof_proto::{method, CacheStats, Client, Event, HealthReport, PackInfo, PrepareResult, Severity, Status};
 
 #[derive(Parser)]
-#[command(name = "xof-cli", version, about = "Control the xporthofs daemon")]
+#[command(name = "xof-cli", version, about = "Control the ButterSat daemon")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -91,7 +91,7 @@ fn set_path(v: &mut Value, key: &str, val: &str) -> anyhow::Result<()> {
 }
 
 fn print_status(s: &Status) {
-    println!("xporthofs {}", s.version);
+    println!("ButterSat {}", s.version);
     println!("  mounted:     {} {}", s.mounted, s.mount_point.as_deref().unwrap_or(""));
     if let Some(e) = &s.mount_error {
         println!("  mount error: {e}");

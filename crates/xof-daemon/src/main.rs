@@ -1,4 +1,4 @@
-//! xof-daemon: the xporthofs data plane (design §3). Owns the mount, caches,
+//! xof-daemon: the ButterSat data plane (design §3). Owns the mount, caches,
 //! streaming and prefetch; controlled over IPC by the UI and CLI.
 
 mod airports;
@@ -21,7 +21,7 @@ use xof_proto::config::Dirs;
 use xof_proto::{Event, LogLine};
 
 #[derive(Parser, Debug)]
-#[command(name = "xof-daemon", version, about = "xporthofs scenery streaming daemon")]
+#[command(name = "xof-daemon", version, about = "ButterSat scenery streaming daemon")]
 struct Args {
     /// Config file (default: per-user config dir).
     #[arg(long)]
@@ -86,7 +86,7 @@ fn main() -> anyhow::Result<()> {
 
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().thread_name("xof-rt").build()?;
     let config_path = args.config.unwrap_or_else(|| dirs.config_file.clone());
-    tracing::info!("xporthofs daemon {} starting (config: {})", env!("CARGO_PKG_VERSION"), config_path.display());
+    tracing::info!("ButterSat daemon {} starting (config: {})", env!("CARGO_PKG_VERSION"), config_path.display());
 
     let _guard = rt.enter();
     let app = App::new(dirs, config_path, rt.handle().clone())?;

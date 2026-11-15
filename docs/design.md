@@ -1,8 +1,8 @@
-# xporthofs — Design
+# ButterSat — Design
 
 Status: implemented on branch `impl` (2026-11-15); see §18 for status and deviations
 
-xporthofs is a virtual filesystem that presents X-Plane 12 with orthophoto
+ButterSat is a virtual filesystem that presents X-Plane 12 with orthophoto
 scenery. Both the terrain mesh and the textures are streamed: meshes from a
 hosted catalog we build, textures generated on demand from online
 satellite/aerial imagery. The core is written in Rust, the control UI uses
@@ -120,7 +120,7 @@ and a future FSKit backend reuses everything.
 ### 4.1 Backends
 - **Windows 10/11:** WinFsp via the `winfsp` crate (winfsp-rs). The WinFsp MSI
   is bundled in our installer and installed silently. Mounts directly onto
-  `Custom Scenery\z_xporthofs` (the directory must not pre-exist — WinFsp
+  `Custom Scenery\z_buttersat` (the directory must not pre-exist — WinFsp
   creates it as a reparse point) without admin rights. Build needs the WinFsp
   SDK and libclang (bindgen).
   - Rejected: ProjFS / Cloud Files API (Microsoft-native, but they hydrate
@@ -137,12 +137,12 @@ and a future FSKit backend reuses everything.
   Developer Program for the entitlement + notarization).
 
 ### 4.2 Mount layout and sources
-One mountpoint, `Custom Scenery/z_xporthofs/`, presenting a merged view.
+One mountpoint, `Custom Scenery/z_buttersat/`, presenting a merged view.
 For each 1°×1° tile, sources in priority order:
 
 1. **Imported packs** (optional, power users) in the backing dir
-   (`%LOCALAPPDATA%\xporthofs\packs\*`, `~/.local/share/xporthofs/packs/*`,
-   `~/Library/Application Support/xporthofs/packs/*`). Passthrough, including
+   (`%LOCALAPPDATA%\ButterSat\packs\*`, `~/.local/share/ButterSat/packs/*`,
+   `~/Library/Application Support/ButterSat/packs/*`). Passthrough, including
    any real `.dds` files they contain.
 2. **Streamed catalog** (§6), filtered by the user's coverage setting
    (worldwide by default).
@@ -518,13 +518,13 @@ Packaging: MSI/NSIS (Windows), DMG (macOS), AppImage/deb (Linux) via the Tauri
 bundler. Unsigned initially (SmartScreen / Gatekeeper prompt once).
 
 ### 11.1 Licensing obligations
-xporthofs is licensed under **MIT**. Bundling WinFsp relies on its FLOSS
+ButterSat is licensed under **MIT**. Bundling WinFsp relies on its FLOSS
 exception, which requires that we:
 - ship only **unmodified** official WinFsp installer releases;
 - show "WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos"
   with a link to the WinFsp repository **in the UI (About screen) and in
   user-facing docs**;
-- **not link or distribute xporthofs with proprietary software.** Consequence:
+- **not link or distribute ButterSat with proprietary software.** Consequence:
   the Windows installer must not embed Microsoft's WebView2 runtime/bootstrapper
   — use Tauri's `downloadBootstrapper` mode (or rely on the WebView2 runtime
   preinstalled on Windows 10/11). All Rust/JS dependencies must be FLOSS
@@ -538,9 +538,9 @@ screen.
 ## 12. Daemon, IPC, configuration
 
 - Transport via the `interprocess` crate:
-  - Windows: named pipe `\\.\pipe\xporthofs-<user SID>` (ACL: current user only);
-  - Linux: `$XDG_RUNTIME_DIR/xporthofs.sock`;
-  - macOS: `~/Library/Application Support/xporthofs/daemon.sock`.
+  - Windows: named pipe `\\.\pipe\ButterSat-<user SID>` (ACL: current user only);
+  - Linux: `$XDG_RUNTIME_DIR/ButterSat.sock`;
+  - macOS: `~/Library/Application Support/ButterSat/daemon.sock`.
 - Protocol: newline-delimited JSON-RPC 2.0. Requests: `status`, `mount`,
   `unmount`, `shutdown`, `get_config`/`set_config`, `cache_stats`,
   `cache_evict_area`, `catalog_status`, `prepare_departure`, `packs_list`,
@@ -643,7 +643,7 @@ screen.
 | Data licences (OSM ODbL, DEM) | OSM + NED/Copernicus only; attribution in app |
 | Redistributing Laminar data | Hosted DSFs never contain Global Scenery rasters; spliced locally from the user's own install (§6.2); publish-time guard |
 | Splice depends on Global Scenery layout/format | Fallback to stripped DSF; index keyed on file size+mtime; covered by tests against a real XP12 install |
-| WinFsp licence: GPLv3 with a FLOSS exception; closed-source distribution needs a commercial licence | Decided: xporthofs is MIT-licensed (satisfies the OSD, so the exception applies). Exception conditions we must keep — see §11.1 |
+| WinFsp licence: GPLv3 with a FLOSS exception; closed-source distribution needs a commercial licence | Decided: ButterSat is MIT-licensed (satisfies the OSD, so the exception applies). Exception conditions we must keep — see §11.1 |
 | Provider blocks / rate limits / ToS | Per-provider rate limits, one-time notice, multiple providers |
 | X-Plane read patterns differ from assumptions | Instrument reads in M1; band design still works, only budgets change |
 | Defender / indexers trigger mass fetches | PID filter + installer exclusion (§4.5) |

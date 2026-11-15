@@ -1,6 +1,6 @@
 [package]
 name = "xof-mesh"
-description = "Mesh catalog, streaming and Laminar raster splice for xporthofs"
+description = "Mesh catalog, streaming and Laminar raster splice for ButterSat"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -154,7 +154,7 @@ pub struct Fetcher {
 impl Fetcher {
     pub fn new(provider: Arc<dyn Provider>) -> anyhow::Result<Self> {
         let client = reqwest::Client::builder()
-            .user_agent(concat!("xporthofs/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("ButterSat/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(20))
             .connect_timeout(Duration::from_secs(10))
             .pool_max_idle_per_host(32)

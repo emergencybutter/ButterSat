@@ -8,7 +8,7 @@ use xof_mesh::Coverage;
 
 /// Default mesh origins. The manifest's own `mirrors` list is used after the
 /// first successful fetch.
-pub const DEFAULT_MESH_MIRRORS: &[&str] = &["https://mesh.xporthofs.org/v1"];
+pub const DEFAULT_MESH_MIRRORS: &[&str] = &["https://mesh.buttersat.org/v1"];
 
 /// Trusted manifest signing keys (ed25519, hex). Release builds embed the
 /// project key here; additional keys can be added in config.
@@ -56,7 +56,7 @@ pub struct XPlaneConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct MountConfig {
-    /// Mount point; default `<X-Plane>/Custom Scenery/z_xporthofs`.
+    /// Mount point; default `<X-Plane>/Custom Scenery/z_buttersat`.
     pub path: Option<PathBuf>,
     /// Mount automatically when the daemon starts.
     pub auto_mount: bool,
@@ -206,9 +206,9 @@ impl Dirs {
             let h = PathBuf::from(home);
             return Self { config_file: h.join("config.toml"), data: h.join("data"), cache: h.join("cache") };
         }
-        let base_cfg = dirs::config_dir().unwrap_or_else(std::env::temp_dir).join("xporthofs");
-        let data = dirs::data_local_dir().unwrap_or_else(std::env::temp_dir).join("xporthofs");
-        let cache = dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("xporthofs");
+        let base_cfg = dirs::config_dir().unwrap_or_else(std::env::temp_dir).join("ButterSat");
+        let data = dirs::data_local_dir().unwrap_or_else(std::env::temp_dir).join("ButterSat");
+        let cache = dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("ButterSat");
         Self { config_file: base_cfg.join("config.toml"), data, cache }
     }
 

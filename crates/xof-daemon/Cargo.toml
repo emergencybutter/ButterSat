@@ -1,6 +1,6 @@
 [package]
 name = "xof-daemon"
-description = "xporthofs scenery streaming daemon"
+description = "ButterSat scenery streaming daemon"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

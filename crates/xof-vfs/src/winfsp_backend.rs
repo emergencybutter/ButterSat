@@ -264,7 +264,7 @@ impl FileSystemContext for WinFs {
     fn get_volume_info(&self, out: &mut VolumeInfo) -> winfsp::Result<()> {
         out.total_size = 1 << 40;
         out.free_size = 0;
-        out.set_volume_label("xporthofs");
+        out.set_volume_label("ButterSat");
         Ok(())
     }
 }
@@ -292,7 +292,7 @@ impl Mount {
             .persistent_acls(true)
             .read_only_volume(true)
             .post_cleanup_when_modified_only(true)
-            .filesystem_name("xporthofs");
+            .filesystem_name("ButterSat");
         let classifier = ProcessClassifier::new(scenery.xplane_processes());
         let fs = WinFs { scenery, classifier, security: Security::new()? };
         let mut host: FileSystemHost<WinFs, winfsp::host::FineGuard> =
