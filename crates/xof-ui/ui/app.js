@@ -595,7 +595,11 @@ $("st-fresh").addEventListener("click", () => relocate("fresh"));
 $("st-cancel").addEventListener("click", () => $("st-confirm").classList.add("hidden"));
 
 // ---------------------------------------------------------------- first launch: imagery choice
-const ESRI_TERMS = "https://www.esri.com/en-us/legal/terms/full-master-agreement";
+const COMMERCIAL = {
+  esri: { name: "Esri", label: "Use Esri imagery", terms: "https://www.esri.com/en-us/legal/terms/full-master-agreement" },
+  bing: { name: "Microsoft's (Bing Maps)", label: "Use Bing imagery", terms: "https://www.microsoft.com/maps/product/terms.html" },
+};
+let frPick = null;
 
 async function saveImageryChoice(patch) {
   const c = await rpc("get_config");
@@ -629,23 +633,29 @@ async function firstRun() {
       out.textContent = String(e);
     }
   };
-  $("fr-esri").onclick = () => {
-    $("fr-esri").classList.add("selected");
+  const pick = (id) => {
+    frPick = id;
+    for (const k of Object.keys(COMMERCIAL)) $("fr-" + k).classList.toggle("selected", k === id);
+    $("fr-terms-name").textContent = COMMERCIAL[id].name;
+    $("fr-confirm").textContent = COMMERCIAL[id].label;
+    $("fr-accept").checked = false;
     $("fr-accept-row").classList.remove("hidden");
     $("fr-confirm").classList.remove("hidden");
-    $("fr-confirm").disabled = !$("fr-accept").checked;
+    $("fr-confirm").disabled = true;
   };
+  $("fr-esri").onclick = () => pick("esri");
+  $("fr-bing").onclick = () => pick("bing");
   $("fr-accept").onchange = () => ($("fr-confirm").disabled = !$("fr-accept").checked);
   $("fr-terms").onclick = (ev) => {
     ev.preventDefault();
     try {
-      T.opener.openUrl(ESRI_TERMS);
+      if (frPick) T.opener.openUrl(COMMERCIAL[frPick].terms);
     } catch (_) {}
   };
   $("fr-confirm").onclick = async () => {
-    if (!$("fr-accept").checked) return;
+    if (!$("fr-accept").checked || !frPick) return;
     try {
-      await saveImageryChoice({ provider: "esri", prefer_open: false, provider_notice_accepted: true });
+      await saveImageryChoice({ provider: frPick, prefer_open: false, provider_notice_accepted: true });
       done();
     } catch (e) {
       out.className = "result err";

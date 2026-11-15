@@ -244,8 +244,12 @@
         <strong>Esri World Imagery (sharper, worldwide)</strong>
         <span>Higher resolution almost everywhere, including ZL17 around airports. Esri's terms of use apply to this imagery.</span>
       </button>
+      <button type="button" class="choice" id="fr-bing">
+        <strong>Bing Maps Aerial (worldwide)</strong>
+        <span>Microsoft's aerial imagery, similar coverage to Esri. Microsoft's terms of use apply, and Microsoft is winding down this service, so it may stop working.</span>
+      </button>
       <label class="check fr-accept hidden" id="fr-accept-row"><input type="checkbox" id="fr-accept">
-        I have read <a href="#" id="fr-terms">Esri's terms of use</a> and use the imagery for personal flight simulation only.</label>
+        I have read <a href="#" id="fr-terms"><span id="fr-terms-name">Esri's</span> terms of use</a> and use the imagery for personal flight simulation only.</label>
       <div class="row end">
         <span id="fr-result" class="result"></span>
         <button type="button" class="primary hidden" id="fr-confirm">Use Esri imagery</button>
