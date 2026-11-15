@@ -276,6 +276,11 @@ impl MeshStreamer {
         self.cfg.cache_dir.join("spliced").join(format!("{}.{}.{fp}.dsf", t.name(), &e.dsf.object.blake3[..16]))
     }
 
+    /// Is the final (spliced) DSF already on disk, so a read needs no network?
+    pub fn is_dsf_ready(&self, t: DsfTile) -> bool {
+        self.entry(t).is_some_and(|e| self.spliced_path(t, &e).exists())
+    }
+
     fn is_cached(&self, t: DsfTile, e: &TileEntry) -> bool {
         self.spliced_path(t, e).exists() || self.object_path(&e.dsf.object.blake3, "dsf.zst").exists()
     }
