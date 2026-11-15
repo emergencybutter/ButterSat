@@ -32,11 +32,16 @@ pub struct EngineConfig {
     pub decoded_ram_mb: usize,
     /// How many zoom levels up to search for a fallback ancestor.
     pub max_fallback_levels: u8,
+    /// On open by X-Plane, build every segment of the texture in parallel
+    /// instead of band by band as reads arrive (X-Plane reads a texture
+    /// front to back, so on-demand building costs ~30 sequential fetch round
+    /// trips per texture).
+    pub read_ahead: bool,
 }
 
 impl Default for EngineConfig {
     fn default() -> Self {
-        Self { deadline_ms: 1200, segment_ram_mb: 1024, decoded_ram_mb: 256, max_fallback_levels: 8 }
+        Self { deadline_ms: 1200, segment_ram_mb: 1024, decoded_ram_mb: 256, max_fallback_levels: 8, read_ahead: true }
     }
 }
 
@@ -237,15 +242,30 @@ impl TextureEngine {
         Ok(out)
     }
 
-    /// Called when a texture is opened: build the header + tail eagerly so the
-    /// fallback tile (ZL-4) is available as early as possible.
+    /// Called when a texture is opened: build the tail eagerly so the
+    /// fallback tile (ZL-4) is available as early as possible, and (read
+    /// ahead) every band for X-Plane. Reads join these builds in flight.
     pub fn on_open(&self, tex: &TextureId, class: ReaderClass) {
-        let this = self.clone();
-        let tex = tex.clone();
-        tokio::spawn(async move {
-            let ctx = ReadCtx { deadline: Instant::now() + Duration::from_secs(30), class };
-            let _ = this.segment(&tex, Segment::Tail, ctx).await;
-        });
+        {
+            let this = self.clone();
+            let tex = tex.clone();
+            tokio::spawn(async move {
+                let ctx = ReadCtx { deadline: Instant::now() + Duration::from_secs(30), class };
+                let _ = this.segment(&tex, Segment::Tail, ctx).await;
+            });
+        }
+        if class == ReaderClass::XPlane && self.inner.cfg.read_ahead {
+            let ctx = self.live_ctx();
+            let mut segs: Vec<Segment> = dds::pieces(0, dds::FILE_LEN).iter().map(|p| p.segment).collect();
+            segs.dedup();
+            for seg in segs.into_iter().filter(|s| matches!(s, Segment::Band { .. })) {
+                let this = self.clone();
+                let tex = tex.clone();
+                tokio::spawn(async move {
+                    let _ = this.segment(&tex, seg, ctx).await;
+                });
+            }
+        }
     }
 
     /// Does RAM hold any degraded segment of this texture?

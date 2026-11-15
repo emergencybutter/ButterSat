@@ -85,6 +85,8 @@ pub struct ImageryConfig {
     /// Concurrent imagery requests in flight / while X-Plane loads.
     pub max_requests: usize,
     pub loading_max_requests: usize,
+    /// Build a whole texture as soon as X-Plane opens it.
+    pub read_ahead: bool,
     pub cache_size_gb: u64,
     pub segment_ram_mb: usize,
     pub decoded_ram_mb: usize,
@@ -99,6 +101,7 @@ impl Default for ImageryConfig {
             loading_deadline_ms: 20_000,
             max_requests: 32,
             loading_max_requests: 64,
+            read_ahead: true,
             cache_size_gb: 100,
             segment_ram_mb: 1024,
             decoded_ram_mb: 256,

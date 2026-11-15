@@ -89,6 +89,7 @@ fn build_stack(
                 deadline_ms: cfg.imagery.deadline_ms,
                 segment_ram_mb: cfg.imagery.segment_ram_mb,
                 decoded_ram_mb: cfg.imagery.decoded_ram_mb,
+                read_ahead: cfg.imagery.read_ahead,
                 ..Default::default()
             },
             provider,

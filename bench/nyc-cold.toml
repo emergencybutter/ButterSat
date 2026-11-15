@@ -31,20 +31,19 @@ name = "reference"
 packs = ["../../xporthofs-build/Ortho4XP/Tiles/zOrtho4XP_+40-074"]
 
 [[variant]]
-name = "xof-16"
-description = "previous fetch concurrency: 16 requests"
+name = "xof-no-readahead"
+description = "build bands on demand, as X-Plane reads them (previous behaviour)"
 xof = true
 [variant.config.imagery]
-max_requests = 16
-loading_max_requests = 16
+read_ahead = false
 
 [[variant]]
-name = "xof-64"
-description = "new: 64 requests while loading (32 in flight)"
+name = "xof-readahead"
+description = "build the whole texture when X-Plane opens it"
 xof = true
 
 [[variant]]
-name = "xof-prewarm"
-description = "new concurrency + departure pre-warm started when X-Plane is launched"
+name = "xof-readahead-prewarm"
+description = "read-ahead + departure pre-warm started when X-Plane is launched"
 xof = true
 prewarm_wait_s = 0
