@@ -102,8 +102,18 @@ fn write_atomic(p: &Path, text: &str) -> anyhow::Result<()> {
 #[cfg(windows)]
 fn make_link(target: &Path, link: &Path) -> anyhow::Result<()> {
     // A junction needs no privileges (unlike a symlink).
-    let out = std::process::Command::new("cmd").arg("/C").arg("mklink").arg("/J").arg(link).arg(target).output()?;
-    anyhow::ensure!(out.status.success(), "mklink /J failed: {}", String::from_utf8_lossy(&out.stdout));
+    let win = |p: &Path| p.to_string_lossy().replace('/', "\\");
+    anyhow::ensure!(target.is_absolute(), "link target {} is not absolute", target.display());
+    let out =
+        std::process::Command::new("cmd").arg("/C").arg("mklink").arg("/J").arg(win(link)).arg(win(target)).output()?;
+    anyhow::ensure!(
+        out.status.success(),
+        "mklink /J {} {} failed: {}{}",
+        win(link),
+        win(target),
+        String::from_utf8_lossy(&out.stdout).trim(),
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
     Ok(())
 }
 

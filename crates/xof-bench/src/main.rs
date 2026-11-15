@@ -53,6 +53,9 @@ enum Cmd {
     },
     /// Re-score a run folder and rebuild its report.
     Report { run_dir: PathBuf },
+    /// Fold the variant runs of other run folders into `into` (same scenario),
+    /// replacing failed runs of the same variant, then rebuild the report.
+    Merge { into: PathBuf, from: Vec<PathBuf> },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -109,9 +112,61 @@ fn main() -> anyhow::Result<()> {
             finish(rec, &run_dir, keep_png)?;
         }
         Cmd::Report { run_dir } => {
-            let mut rec: record::RunRecord = serde_json::from_slice(&std::fs::read(run_dir.join("run.json"))?)?;
+            let mut rec = load(&run_dir)?;
             finish(&mut rec, &run_dir, true)?;
         }
+        Cmd::Merge { into, from } => {
+            let mut rec = load(&into)?;
+            for dir in &from {
+                merge(&mut rec, &into, &load(dir)?, dir)?;
+            }
+            finish(&mut rec, &into, true)?;
+        }
+    }
+    Ok(())
+}
+
+fn load(dir: &std::path::Path) -> anyhow::Result<record::RunRecord> {
+    Ok(serde_json::from_slice(&std::fs::read(dir.join("run.json"))?)?)
+}
+
+fn merge(
+    rec: &mut record::RunRecord,
+    into: &std::path::Path,
+    other: &record::RunRecord,
+    other_dir: &std::path::Path,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        rec.scenario.name == other.scenario.name,
+        "different scenarios: {} vs {}",
+        rec.scenario.name,
+        other.scenario.name
+    );
+    for r in other.runs.iter().filter(|r| r.error.is_none()) {
+        rec.runs.retain(|x| !(x.variant == r.variant && x.error.is_some()));
+        let mut r = r.clone();
+        // A fresh shots folder name in the target run.
+        let mut k = 0;
+        let folder = loop {
+            let f =
+                if k == 0 { format!("{}-{}", r.variant, r.repeat) } else { format!("{}-{}-m{k}", r.variant, r.repeat) };
+            if !into.join("shots").join(&f).exists() {
+                break f;
+            }
+            k += 1;
+        };
+        std::fs::create_dir_all(into.join("shots").join(&folder))?;
+        for s in &mut r.spots {
+            for shot in &mut s.shots {
+                for f in std::iter::once(&mut shot.file).chain(shot.thumb.as_mut()) {
+                    let name = std::path::Path::new(f.as_str()).file_name().unwrap().to_string_lossy().to_string();
+                    std::fs::copy(other_dir.join(f.as_str()), into.join("shots").join(&folder).join(&name))?;
+                    *f = format!("shots/{folder}/{name}");
+                }
+            }
+        }
+        println!("merged {} from {}", r.variant, other_dir.display());
+        rec.runs.push(r);
     }
     Ok(())
 }

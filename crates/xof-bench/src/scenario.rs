@@ -84,6 +84,13 @@ pub struct Variant {
     pub config: toml::Table,
 }
 
+/// `canonicalize` on Windows yields a verbatim `\\?\C:\...` path, which cmd and X-Plane dislike.
+fn strip_verbatim(p: PathBuf) -> PathBuf {
+    let stripped =
+        p.to_str().and_then(|s| s.strip_prefix(r"\\?\")).filter(|rest| !rest.starts_with("UNC")).map(PathBuf::from);
+    stripped.unwrap_or(p)
+}
+
 fn default_aircraft() -> String {
     "Aircraft/Laminar Research/Cessna 172 SP/Cessna_172SP.acf".into()
 }
@@ -108,7 +115,11 @@ impl Scenario {
         let text = std::fs::read_to_string(path)?;
         let mut s: Scenario = toml::from_str(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
         let base = path.parent().unwrap_or(Path::new("."));
-        let abs = |p: &PathBuf| if p.is_absolute() { p.clone() } else { base.join(p) };
+        // Absolute and normalised: links (Windows junctions) need absolute targets.
+        let abs = |p: &PathBuf| {
+            let j = if p.is_absolute() { p.clone() } else { base.join(p) };
+            std::fs::canonicalize(&j).map(strip_verbatim).unwrap_or(j)
+        };
         s.origin = s.origin.as_ref().map(abs);
         for v in &mut s.variants {
             v.packs = v.packs.iter().map(abs).collect();
