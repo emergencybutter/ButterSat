@@ -1,6 +1,6 @@
 # xporthofs — Design
 
-Status: draft, pre-implementation (2026-11-14)
+Status: implemented on branch `impl` (2026-11-15); see §18 for status and deviations
 
 xporthofs is a virtual filesystem that presents X-Plane 12 with orthophoto
 scenery. Both the terrain mesh and the textures are streamed: meshes from a
@@ -93,7 +93,7 @@ X-Plane 12 ──Web API (ws, :8086)───────────► │  �
 - **Daemon owns the data plane.** The UI is a pure control plane; closing or
   crashing it never unmounts. The UI spawns the daemon as a detached helper if
   none is running; the daemon only unmounts on explicit `shutdown`.
-- Later: optional start-at-login (Windows: per-user Task Scheduler task;
+- Optional start-at-login (Windows: per-user `HKCU\…\Run` entry;
   Linux: systemd user unit; macOS: launchd agent).
 
 ### Cargo workspace
@@ -284,7 +284,7 @@ A single signed manifest describes all hosted tiles:
   "attribution": ["© OpenStreetMap contributors", "Copernicus DEM …"],
   "tiles": {
     "+40-074": {
-      "dsf":   { "object": "tiles/+40-080/+40-074.3f9a….dsf.7z", "size": 24709700,
+      "dsf":   { "object": "tiles/+40-080/+40-074.3f9a….dsf.zst", "size": 27305512,
                  "stripped_size": 42987139, "blake3": "…" },   // no Laminar rasters
       "masks": [ { "name": "…png", "object": "masks/….png", "size": 12345, "blake3": "…" } ],
       "zl": { "base": 16, "airports": 17 }
@@ -365,7 +365,7 @@ running X-Plane.
 
 ### 6.6 Mesh cache
 Plain files on disk (few, large), separate size cap and LRU from the imagery
-cache. Stores the downloaded 7z object and the spliced uncompressed DSF (the
+cache. Stores the downloaded zstd object and the spliced uncompressed DSF (the
 latter can be regenerated locally if evicted). Tiles around frequently used
 airports can be pinned.
 
@@ -450,7 +450,8 @@ live in T1 with a TTL.
 3. Runs on preemptible cloud VMs or the self-hosted server; ~3 min compute per
    dense tile.
 4. `xof-publish`: **reject any DSF containing `DEMS` data** (guard against
-   accidentally publishing Laminar rasters), 7z-compress DSFs, compute BLAKE3,
+   accidentally publishing Laminar rasters, or strip them with `--strip-rasters`),
+   zstd-compress DSFs (level 19), compute BLAKE3,
    write content-addressed objects, generate and sign the manifest, upload.
 5. Automated checks per tile: DSF parses, expected terrain names, size sanity;
    a sample loaded in X-Plane for each release.
@@ -465,7 +466,7 @@ Any static HTTPS server satisfying:
 ```
 /v1/manifest.json.zst
 /v1/manifest.json.zst.sig
-/v1/tiles/+40-080/+40-074.<blake3-prefix>.dsf
+/v1/tiles/+40-080/+40-074.<blake3-prefix>.dsf.zst
 /v1/masks/<name>.<blake3-prefix>.png
 ```
 
@@ -652,3 +653,47 @@ screen.
 - **Reusing AutoOrtho's published meshes** — external dependency, unverified
   redistribution terms, packaged as large region archives.
 - **ProjFS / Cloud Files API, Dokan, NFS** for Windows — see §4.1.
+
+---
+
+## 18. Implementation status (2026-11-15)
+
+All milestones M1–M5 are implemented on branch `impl`; spike results are in
+[`findings-s3-s5.md`](findings-s3-s5.md).
+
+| Area | Status | Verified |
+|---|---|---|
+| `xof-core` (tile math, names, DDS, BC1, providers, T1/T2 caches, engine with deadlines, fallback, upgrades, dynamic zoom) | done | unit + mock-server tests; live Esri texture matches Ortho4XP at 33 dB |
+| `xof-mesh` (DSF splice/strip, signed catalog, streamer, raster index, offline, deferred updates) | done | byte-identical to Ortho4XP on `+40-074`; mock-origin tests |
+| `xof-vfs` WinFsp backend | done | end-to-end mount test on Windows |
+| `xof-vfs` FUSE backend (Linux, macOS/macFUSE) | done | compiles and unit-tests on Linux (WSL); mount test needs `fusermount3`; macOS untested |
+| `xof-daemon` (IPC, X-Plane detection, `scenery_packs.ini`, Web API, prefetch, health, housekeeping, autostart) | done | daemon + CLI exercised against a local signed NYC catalog |
+| `xof-cli` | done | |
+| `xof-publish` (keygen, build, upload dir/S3, verify) | done | NYC pilot published and streamed |
+| `xof-ui` (Tauri) | done | launches; pages checked in a browser with a mocked bridge |
+| Installer (NSIS hooks: WinFsp MSI, Defender prompt), CI, cargo-deny | done | not yet run on CI / not yet built into an installer |
+
+### Deviations from the text above
+
+- **Hosted DSFs are zstd, not 7z** (§6.1, §10): the daemon always decompresses
+  to splice, so X-Plane's native 7z support no longer matters; zstd is ~10 %
+  larger but much faster to decode.
+- **Start at login on Windows** uses the per-user `Run` key instead of Task
+  Scheduler (no admin rights needed).
+- **BC1 "high quality" background encoding** (§5.3) uses the same ISPC encoder
+  as live reads: ISPC's BC1 has a single quality mode and is already within
+  ~1 dB of nvcompress. A slower encoder can be slotted into `bc1::encode` later.
+- **Imagery prefetch** warms zooms ZL-4…ZL-1 in a corridor; full ZL textures
+  are built on demand only.
+- **Default mesh origin/key**: `config::DEFAULT_MESH_MIRRORS` points at a
+  placeholder domain and `DEFAULT_MESH_KEYS` is empty until a real catalog is
+  hosted; until then users add the origin and key in config.
+
+### Open items
+
+- Run the macOS (macFUSE FSKit mode) and Linux FUSE mounts on real machines.
+- Fly the NYC pilot in X-Plane 12 (M1 acceptance) and tune `deadline_ms`.
+- Local Overpass for the build pipeline; skip all-ocean tiles automatically.
+- Host the catalog (R2 and/or self-hosted) and embed the release key.
+- Build signed installers (`scripts/stage-release.ps1`, `cargo tauri build`).
+
