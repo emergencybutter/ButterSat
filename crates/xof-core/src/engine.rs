@@ -130,6 +130,8 @@ struct Inner {
     inflight: Mutex<HashMap<SegKey, SegFuture>>,
     upgrading: Mutex<HashSet<SegKey>>,
     reduced_zoom: AtomicBool,
+    /// Textures already read ahead (cleared when large).
+    read_ahead_done: Mutex<HashSet<TextureId>>,
     /// Live-read budget; starts at `cfg.deadline_ms`, set by the daemon per sim phase.
     live_deadline_ms: AtomicU64,
     stats: EngineStats,
@@ -154,6 +156,7 @@ impl TextureEngine {
                 fetcher: Fetcher::new(provider)?,
                 store,
                 live_deadline_ms: AtomicU64::new(cfg.deadline_ms),
+                read_ahead_done: Mutex::new(HashSet::new()),
                 cfg,
                 inflight: Mutex::new(HashMap::new()),
                 upgrading: Mutex::new(HashSet::new()),
@@ -221,6 +224,12 @@ impl TextureEngine {
         let pieces = dds::pieces(off, len);
         let mut unique: Vec<Segment> = pieces.iter().map(|p| p.segment).collect();
         unique.dedup();
+        if ctx.class == ReaderClass::XPlane
+            && self.inner.cfg.read_ahead
+            && unique.iter().any(|s| matches!(s, Segment::Band { .. }))
+        {
+            self.read_ahead(tex, ctx);
+        }
         let bufs = futures::future::join_all(unique.iter().map(|s| self.segment(tex, *s, ctx))).await;
         let mut map = HashMap::new();
         for (s, b) in unique.iter().zip(bufs) {
@@ -243,8 +252,7 @@ impl TextureEngine {
     }
 
     /// Called when a texture is opened: build the tail eagerly so the
-    /// fallback tile (ZL-4) is available as early as possible, and (read
-    /// ahead) every band for X-Plane. Reads join these builds in flight.
+    /// fallback tile (ZL-4) is available as early as possible.
     pub fn on_open(&self, tex: &TextureId, class: ReaderClass) {
         {
             let this = self.clone();
@@ -254,17 +262,30 @@ impl TextureEngine {
                 let _ = this.segment(&tex, Segment::Tail, ctx).await;
             });
         }
-        if class == ReaderClass::XPlane && self.inner.cfg.read_ahead {
-            let ctx = self.live_ctx();
-            let mut segs: Vec<Segment> = dds::pieces(0, dds::FILE_LEN).iter().map(|p| p.segment).collect();
-            segs.dedup();
-            for seg in segs.into_iter().filter(|s| matches!(s, Segment::Band { .. })) {
-                let this = self.clone();
-                let tex = tex.clone();
-                tokio::spawn(async move {
-                    let _ = this.segment(&tex, seg, ctx).await;
-                });
+    }
+
+    /// Read-ahead: build every band of `tex` in parallel, once. Triggered by
+    /// the first read that touches image data, not by open: X-Plane's
+    /// startup scan opens every texture to peek at its header, and building
+    /// them all then stalls the scan (seen in xof-bench).
+    fn read_ahead(&self, tex: &TextureId, ctx: ReadCtx) {
+        {
+            let mut done = self.inner.read_ahead_done.lock();
+            if done.len() > 4096 {
+                done.clear();
             }
+            if !done.insert(tex.clone()) {
+                return;
+            }
+        }
+        let mut segs: Vec<Segment> = dds::pieces(0, dds::FILE_LEN).iter().map(|p| p.segment).collect();
+        segs.dedup();
+        for seg in segs.into_iter().filter(|s| matches!(s, Segment::Band { .. })) {
+            let this = self.clone();
+            let tex = tex.clone();
+            tokio::spawn(async move {
+                let _ = this.segment(&tex, seg, ctx).await;
+            });
         }
     }
 

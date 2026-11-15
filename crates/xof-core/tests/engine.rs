@@ -96,7 +96,8 @@ async fn serve(slow_z: u8, delay: Duration) -> (String, Arc<AtomicU64>) {
 
 fn engine(base: String, hits: Arc<AtomicU64>, dir: &std::path::Path, deadline_ms: u64) -> TextureEngine {
     let store = TileStore::open(&dir.join("tiles.redb")).unwrap();
-    let cfg = EngineConfig { deadline_ms, ..Default::default() };
+    // Band-level behaviour; read-ahead has its own test.
+    let cfg = EngineConfig { deadline_ms, read_ahead: false, ..Default::default() };
     TextureEngine::new(cfg, Arc::new(Mock { base, hits }), store).unwrap()
 }
 
@@ -169,6 +170,38 @@ async fn slow_tiles_degrade_then_upgrade() {
     let data = e.read(&tex(), m0.offset(), 8, e.live_ctx()).await.unwrap();
     assert!(close(bc1::decode(&data, 4, 4).px(0, 0), color(16)));
     assert!(e.stats().upgrades >= 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn read_ahead_starts_on_first_data_read_not_on_open() {
+    let (base, hits) = serve(255, Duration::ZERO).await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = TileStore::open(&dir.path().join("tiles.redb")).unwrap();
+    let e = TextureEngine::new(
+        EngineConfig { deadline_ms: 5000, ..Default::default() },
+        Arc::new(Mock { base, hits: hits.clone() }),
+        store,
+    )
+    .unwrap();
+    // Open + header peek (X-Plane's scenery scan): only the tail tile.
+    e.on_open(&tex(), ReaderClass::XPlane);
+    e.read(&tex(), 0, 128, e.live_ctx()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(hits.load(Ordering::Relaxed), 1);
+    // First data read: the whole texture is built in the background.
+    let m0 = Segment::Band { mip: 0, band: 0 };
+    e.read(&tex(), m0.offset(), 16, e.live_ctx()).await.unwrap();
+    for _ in 0..100 {
+        if hits.load(Ordering::Relaxed) >= 341 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(hits.load(Ordering::Relaxed), 341);
+    // Later reads are served from RAM.
+    let last = Segment::Band { mip: 3, band: 1 };
+    e.read(&tex(), last.offset(), last.len(), e.live_ctx()).await.unwrap();
+    assert_eq!(hits.load(Ordering::Relaxed), 341);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
