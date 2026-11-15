@@ -104,6 +104,8 @@ pub enum Node {
     Mask(String),
     /// `textures/water_transition.png`.
     WaterTransition,
+    /// `README.txt` in the virtual pack root (licensing & attributions).
+    Readme,
 }
 
 impl Node {
@@ -160,6 +162,57 @@ impl Scenery {
 
     pub fn xplane_processes(&self) -> &[String] {
         &self.cfg.xplane_processes
+    }
+
+    /// Contents of `README.txt` in the mounted virtual pack root.
+    pub fn readme_contents(&self) -> String {
+        let p = self.engine.provider();
+        let (cat_ver, cat_lic, cat_attr) = match &self.mesh {
+            Some(m) => {
+                let man = m.manifest();
+                let attr = if man.attribution.is_empty() {
+                    "Mesh data © OpenStreetMap contributors (ODbL 1.0); Elevation data: USGS 3DEP (public domain) / Copernicus DEM".to_string()
+                } else {
+                    man.attribution.join("; ")
+                };
+                (man.catalog_version.clone(), man.license.clone(), attr)
+            }
+            None => (
+                "none".into(),
+                "ODbL-1.0".into(),
+                "Mesh data © OpenStreetMap contributors (ODbL 1.0); Elevation data: USGS 3DEP (public domain) / Copernicus DEM".into(),
+            ),
+        };
+        format!(
+            "ButterSat Virtual Scenery Pack (z_buttersat)\n\
+             ===========================================\n\n\
+             This folder is a virtual X-Plane 12 scenery pack mounted by ButterSat.\n\
+             Terrain meshes (.dsf) and water masks are streamed from the signed ButterSat\n\
+             mesh catalog, and orthophoto textures (.dds) are synthesized on demand.\n\n\
+             Imagery Provider & Attribution\n\
+             ------------------------------\n\
+             Active configuration: {}\n\
+             Attribution: {}\n\
+             Licence / Terms: {}\n\n\
+             Open Regional Imagery Sources (used automatically where coverage exists):\n\
+             - United States: USGS The National Map (3DEP / NAIP / HRO) — Public domain (17 U.S.C. § 105)\n\
+             - France: © IGN France — Géoplateforme BD ORTHO (Licence Ouverte / Open Licence Etalab 2.0)\n\
+             - Switzerland: © swisstopo — SWISSIMAGE (OGD, free use with source attribution)\n\
+             - Netherlands: Beeldmateriaal Nederland / PDOK Luchtfoto (CC BY 4.0)\n\
+             - Spain: © Instituto Geográfico Nacional — PNOA (CC BY 4.0)\n\
+             - Austria: Datenquelle: basemap.at (CC BY 4.0)\n\n\
+             Mesh & Elevation Catalog\n\
+             ------------------------\n\
+             Catalog version: {}\n\
+             Licence: {} (Open Data Commons Open Database License v1.0 — https://opendatacommons.org/licenses/odbl/1-0/)\n\
+             Attribution: {}\n",
+            p.name(),
+            p.attribution(),
+            p.license(),
+            cat_ver,
+            cat_lic,
+            cat_attr,
+        )
     }
 
     /// Case-insensitive lookup of a real file in the imported packs.
@@ -229,7 +282,13 @@ impl Scenery {
                 }
                 None
             }
-            // Anything else only from imported packs (e.g. library.txt).
+            // Anything else only from imported packs (e.g. library.txt), or README.txt.
+            ["readme.txt"] => {
+                if let Some(p) = self.find_real(&rel) {
+                    return Some(Node::Real(p));
+                }
+                Some(Node::Readme)
+            }
             _ => self.find_real(&rel).map(|p| if p.is_dir() { Node::Dir(rel.clone()) } else { Node::Real(p) }),
         }
     }
@@ -268,6 +327,7 @@ impl Scenery {
             Node::Dds(_) => file(dds::FILE_LEN),
             Node::Mask(n) => file(self.mesh.as_ref()?.mask(n)?.object.size),
             Node::WaterTransition => file(water_transition_png().len() as u64),
+            Node::Readme => file(self.readme_contents().len() as u64),
         }
     }
 
@@ -281,6 +341,7 @@ impl Scenery {
             for d in ["Earth nav data", "terrain", "textures"] {
                 out.insert(d.into(), Node::Dir(d.into()));
             }
+            out.insert("README.txt".into(), Node::Readme);
         } else if lower == "earth nav data" {
             for f in self.list_dsf_folders() {
                 out.insert(f.clone(), Node::Dir(format!("Earth nav data/{f}")));
@@ -325,6 +386,7 @@ impl Scenery {
             Node::Real(p) => read_file_range(p, off, len).map_err(|e| e.to_string()),
             Node::Ter(t) => Ok(slice(ter_contents(t, &self.cfg.ter).as_bytes(), off, len)),
             Node::WaterTransition => Ok(slice(water_transition_png(), off, len)),
+            Node::Readme => Ok(slice(self.readme_contents().as_bytes(), off, len)),
             Node::Dsf(t) => {
                 let mesh = self.mesh.clone().ok_or("no mesh")?;
                 if class == ReaderClass::Other && !mesh.is_dsf_ready(*t) {

@@ -242,6 +242,15 @@ function renderStatus(s) {
   $("o-tiles").textContent = m ? `${m.tiles_listed} listed of ${m.tiles_in_catalog}` : "—";
   $("o-downloads").textContent = m ? `${m.downloads} (${fmtMB(m.download_bytes)})${m.failures ? ` · ${m.failures} failed` : ""}` : "—";
   $("o-queue").textContent = `${s.prefetch.queued} queued · ${s.prefetch.mesh_tiles_done} meshes · ${s.prefetch.imagery_tiles_done} imagery tiles`;
+  if ($("o-attrib-imagery")) {
+    $("o-attrib-imagery").textContent = `Imagery: ${s.provider_attribution || s.provider}`;
+  }
+  if ($("o-attrib-mesh")) {
+    const catAttr = m && m.attribution && m.attribution.length
+      ? m.attribution.join(" · ")
+      : "Mesh data © OpenStreetMap contributors (ODbL 1.0) · Elevation data: USGS 3DEP";
+    $("o-attrib-mesh").textContent = catAttr;
+  }
   updateMapLive();
 }
 
@@ -316,6 +325,18 @@ async function initMap() {
     refreshMapData();
     return;
   }
+  if (!config) {
+    try {
+      config = await rpc("get_config");
+    } catch (_) {}
+  }
+  const useEsri = !!(config && config.imagery && config.imagery.provider_notice_accepted);
+  const tiles = useEsri
+    ? ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"]
+    : ["https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"];
+  const attribution = useEsri
+    ? "Imagery © Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+    : "Imagery: USGS The National Map (3DEP / NAIP, public domain)";
   map = new maplibregl.Map({
     container: "mapview",
     style: {
@@ -323,10 +344,10 @@ async function initMap() {
       sources: {
         imagery: {
           type: "raster",
-          tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+          tiles,
           tileSize: 256,
-          maxzoom: 17,
-          attribution: "Imagery © Esri",
+          maxzoom: useEsri ? 17 : 16,
+          attribution,
         },
       },
       layers: [{ id: "imagery", type: "raster", source: "imagery", paint: { "raster-saturation": -0.35, "raster-brightness-max": 0.85 } }],
@@ -577,6 +598,13 @@ $("st-cancel").addEventListener("click", () => $("st-confirm").classList.add("hi
 async function loadAbout() {
   const a = await T.core.invoke("about");
   $("about-version").textContent = a.version;
+  if ($("about-active-attrib") && status) {
+    const m = status.mesh;
+    const cat = m
+      ? `Active catalog ${m.catalog_version} (${m.license || "ODbL-1.0"}): ${(m.attribution || []).join(" · ")}`
+      : "Mesh catalog: © OpenStreetMap contributors (ODbL 1.0) · USGS 3DEP";
+    $("about-active-attrib").textContent = `Active imagery: ${status.provider_attribution || status.provider} — ${cat}`;
+  }
   $("notices").innerHTML = a.notices.map((n) => `<li></li>`).join("");
   [...$("notices").children].forEach((li, i) => (li.textContent = a.notices[i]));
 }

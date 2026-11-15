@@ -248,6 +248,7 @@ fn build(
     }
     manifest.catalog_version = version.into();
     manifest.generated_at = humantime_now();
+    manifest.license = "ODbL-1.0".into();
     if !mirrors.is_empty() {
         manifest.mirrors = mirrors.to_vec();
     }
@@ -255,13 +256,14 @@ fn build(
         manifest.attribution = attribution.to_vec();
     } else if manifest.attribution.is_empty() {
         manifest.attribution = vec![
-            "Mesh data © OpenStreetMap contributors (ODbL)".into(),
-            "Elevation: USGS 3DEP / Copernicus DEM".into(),
+            "Mesh data © OpenStreetMap contributors (ODbL 1.0)".into(),
+            "Elevation data: USGS 3DEP (public domain) / Copernicus DEM".into(),
         ];
     }
     if let Some(cfg) = build_config {
         manifest.build_config = format!("blake3:{}", blake3::hash(&std::fs::read(cfg)?).to_hex());
     }
+    write_license_and_attribution(&v1, &manifest)?;
     let zst = manifest.to_zst()?;
     std::fs::write(v1.join(catalog::MANIFEST_FILE), &zst)?;
     std::fs::write(v1.join(catalog::SIGNATURE_FILE), catalog::sign(&key, &zst))?;
@@ -274,6 +276,77 @@ fn build(
         hex::encode(key.verifying_key().to_bytes())
     );
     Ok(())
+}
+
+fn write_license_and_attribution(v1: &Path, manifest: &Manifest) -> anyhow::Result<()> {
+    let license_txt = "\
+ButterSat Mesh Catalog — Open Data Commons Open Database License (ODbL) v1.0
+============================================================================
+
+SPDX-License-Identifier: ODbL-1.0
+Canonical License Text: https://opendatacommons.org/licenses/odbl/1-0/
+
+This mesh catalog (stripped X-Plane 12 DSF terrain meshes and water/coastline
+masks) is a derivative database / Produced Work derived from OpenStreetMap
+vector data (coastlines, inland water bodies, airport boundaries, and road
+flatten polygons) and public-domain / open digital elevation models.
+
+It is made available under the Open Data Commons Open Database License (ODbL)
+v1.0. You are free to:
+
+  * Share: copy, distribute and use the database.
+  * Create: produce works from the database.
+  * Adapt: modify, transform and build upon the database.
+
+As long as you:
+
+  * Attribute: You must attribute any public use of the database, or works
+    produced from the database, in the manner specified in the ODbL (see the
+    accompanying ATTRIBUTION file).
+  * Share-Alike: If you publicly use any adapted version of this database, or
+    works produced from an adapted database, you must also offer that adapted
+    database under the ODbL.
+  * Keep Open: If you redistribute the database, or an adapted version of it,
+    then you may use technological measures that restrict the work (such as
+    DRM) only if you also redistribute a version without such measures.
+
+No proprietary X-Plane Global Scenery rasters are included in this catalog;
+Laminar Research's base global scenery layers are spliced locally on the end
+user's machine from their own licensed X-Plane 12 installation.
+
+Full legal code of ODbL v1.0: https://opendatacommons.org/licenses/odbl/1-0/
+";
+    std::fs::write(v1.join(catalog::LICENSE_FILE), license_txt)?;
+
+    let mut attr_txt = format!(
+        "ButterSat Mesh Catalog Attribution\n\
+         ==================================\n\
+         Catalog version: {}\n\
+         Generated at:    {}\n\
+         License:         {} (https://opendatacommons.org/licenses/odbl/1-0/)\n\n\
+         Required Attributions:\n",
+        manifest.catalog_version, manifest.generated_at, manifest.license
+    );
+    for line in &manifest.attribution {
+        attr_txt.push_str(&format!("  * {line}\n"));
+    }
+    attr_txt.push_str(
+        "\nData Sources:\n\
+         - Vector coastlines, water bodies, and airport boundaries: © OpenStreetMap\n\
+           contributors (https://www.openstreetmap.org/copyright), licensed under ODbL 1.0.\n\
+         - United States elevation data: U.S. Geological Survey 3D Elevation Program (3DEP)\n\
+           1/3 arc-second DEM (https://www.usgs.gov/3d-elevation-program), public domain\n\
+           (17 U.S.C. § 105).\n\
+         - Global elevation data (outside US): Copernicus DEM GLO-30\n\
+           (© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018; provided\n\
+           under the Copernicus free, full and open data policy).\n",
+    );
+    std::fs::write(v1.join(catalog::ATTRIBUTION_FILE), attr_txt)?;
+    Ok(())
+}
+
+fn is_mutable_meta(rel: &str) -> bool {
+    matches!(rel, catalog::MANIFEST_FILE | catalog::SIGNATURE_FILE | catalog::LICENSE_FILE | catalog::ATTRIBUTION_FILE)
 }
 
 fn humantime_now() -> String {
@@ -294,7 +367,7 @@ fn humantime_now() -> String {
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, rem / 60 % 60, rem % 60)
 }
 
-/// Files under `v1`, objects first and the manifest + signature last.
+/// Files under `v1`, objects first and mutable metadata (`LICENSE`, `ATTRIBUTION`, signature, manifest) last.
 fn upload_order(v1: &Path) -> anyhow::Result<Vec<String>> {
     fn walk(base: &Path, dir: &Path, out: &mut Vec<String>) -> std::io::Result<()> {
         for e in std::fs::read_dir(dir)? {
@@ -309,10 +382,13 @@ fn upload_order(v1: &Path) -> anyhow::Result<Vec<String>> {
     }
     let mut files = Vec::new();
     walk(v1, v1, &mut files)?;
-    files.retain(|f| f != catalog::MANIFEST_FILE && f != catalog::SIGNATURE_FILE);
+    files.retain(|f| !is_mutable_meta(f));
     files.sort();
-    files.push(catalog::SIGNATURE_FILE.into());
-    files.push(catalog::MANIFEST_FILE.into());
+    for meta in [catalog::LICENSE_FILE, catalog::ATTRIBUTION_FILE, catalog::SIGNATURE_FILE, catalog::MANIFEST_FILE] {
+        if v1.join(meta).exists() {
+            files.push(meta.into());
+        }
+    }
     Ok(files)
 }
 
@@ -327,7 +403,7 @@ async fn upload_s3(v1: &Path, endpoint: &str, bucket: &str, region: &str, prefix
     let (mut sent, mut skipped) = (0, 0);
     for rel in upload_order(v1)? {
         let obj_key = format!("{}/{rel}", prefix.trim_matches('/'));
-        let immutable = rel != catalog::MANIFEST_FILE && rel != catalog::SIGNATURE_FILE;
+        let immutable = !is_mutable_meta(&rel);
         if immutable {
             let head = bucket.head_object(Some(&creds), &obj_key).sign(ttl);
             if http.head(head).send().await.map(|r| r.status().is_success()).unwrap_or(false) {
@@ -358,7 +434,7 @@ fn upload_dir(v1: &Path, dest: &Path) -> anyhow::Result<()> {
     let (mut sent, mut skipped) = (0, 0);
     for rel in upload_order(v1)? {
         let to = dest.join(&rel);
-        let immutable = rel != catalog::MANIFEST_FILE && rel != catalog::SIGNATURE_FILE;
+        let immutable = !is_mutable_meta(&rel);
         if immutable && to.exists() {
             skipped += 1;
             continue;
@@ -434,4 +510,44 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Verify { origin, pubkey, sample } => verify(&origin, &pubkey, sample).await?,
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn license_attribution_and_upload_order() {
+        let dir = std::env::temp_dir().join(format!("xof-publish-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let v1 = dir.join("v1");
+        std::fs::create_dir_all(v1.join("tiles/+40-080")).unwrap();
+        std::fs::write(v1.join("tiles/+40-080/+40-074.abc.dsf.zst"), b"dsf").unwrap();
+        let mut m = Manifest::empty();
+        m.catalog_version = "2026.11.1".into();
+        m.generated_at = "2026-11-15T00:00:00Z".into();
+        write_license_and_attribution(&v1, &m).unwrap();
+        let key = SigningKey::generate(&mut rand::rngs::OsRng);
+        let zst = m.to_zst().unwrap();
+        std::fs::write(v1.join(catalog::MANIFEST_FILE), &zst).unwrap();
+        std::fs::write(v1.join(catalog::SIGNATURE_FILE), catalog::sign(&key, &zst)).unwrap();
+
+        let lic = std::fs::read_to_string(v1.join(catalog::LICENSE_FILE)).unwrap();
+        assert!(lic.contains("ODbL-1.0") && lic.contains("opendatacommons.org/licenses/odbl/1-0/"));
+        let attr = std::fs::read_to_string(v1.join(catalog::ATTRIBUTION_FILE)).unwrap();
+        assert!(attr.contains("© OpenStreetMap contributors") && attr.contains("USGS 3DEP"));
+
+        let order = upload_order(&v1).unwrap();
+        assert_eq!(
+            order,
+            vec![
+                "tiles/+40-080/+40-074.abc.dsf.zst",
+                "LICENSE",
+                "ATTRIBUTION",
+                "manifest.json.zst.sig",
+                "manifest.json.zst",
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

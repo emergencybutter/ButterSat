@@ -87,18 +87,54 @@ pub fn find(xp: &Path, icao: &str) -> Option<Airport> {
 }
 
 /// Waypoints (lat, lon) of the user's latest SimBrief flight plan.
+///
+/// Complies with SimBrief's `xml.fetcher.php` guidelines:
+/// - Only called on explicit user action ("Prefetch SimBrief route"), never polled in a loop.
+/// - Identifies the client via `User-Agent` and the `client` query parameter.
+/// - Caches the latest response per user for 60 seconds to avoid redundant requests.
 pub async fn simbrief_route(user: &str) -> anyhow::Result<Vec<(f64, f64)>> {
+    use parking_lot::Mutex;
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+    use std::time::{Duration, Instant};
+
+    const CLIENT_ID: &str = concat!("ButterSat/", env!("CARGO_PKG_VERSION"));
+    const CACHE_TTL: Duration = Duration::from_secs(60);
+
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Vec<(f64, f64)>)>>> = OnceLock::new();
+    static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
+
+    let user = user.trim();
+    anyhow::ensure!(!user.is_empty(), "SimBrief username or pilot ID is empty");
+    let norm_user = user.to_ascii_lowercase();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some((ts, pts)) = cache.lock().get(&norm_user) {
+        if ts.elapsed() < CACHE_TTL {
+            return Ok(pts.clone());
+        }
+    }
+
+    let client = HTTP.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent(CLIENT_ID)
+            .timeout(Duration::from_secs(15))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    });
+
     let key = if user.chars().all(|c| c.is_ascii_digit()) { "userid" } else { "username" };
     let url = "https://www.simbrief.com/api/xml.fetcher.php";
-    let v: serde_json::Value = reqwest::Client::new()
+    let v: serde_json::Value = client
         .get(url)
-        .query(&[(key, user), ("json", "1")])
+        .query(&[(key, user), ("json", "1"), ("client", CLIENT_ID)])
         .send()
         .await?
         .error_for_status()?
         .json()
         .await?;
-    Ok(parse_simbrief(&v))
+    let pts = parse_simbrief(&v);
+    cache.lock().insert(norm_user, (Instant::now(), pts.clone()));
+    Ok(pts)
 }
 
 pub fn parse_simbrief(v: &serde_json::Value) -> Vec<(f64, f64)> {

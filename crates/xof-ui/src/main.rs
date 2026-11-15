@@ -104,11 +104,18 @@ fn about() -> Value {
         "version": env!("CARGO_PKG_VERSION"),
         "licence": "MIT",
         "notices": [
+            "Mesh catalog licensed under ODbL 1.0 (https://opendatacommons.org/licenses/odbl/1-0/) — © OpenStreetMap contributors",
+            "Elevation data: U.S. Geological Survey 3D Elevation Program (3DEP, public domain, 17 U.S.C. § 105) / Copernicus DEM GLO-30",
+            "US open imagery: U.S. Geological Survey (USGS) The National Map (3DEP / NAIP / HRO) — public domain (17 U.S.C. § 105)",
+            "France open imagery: © IGN France — Géoplateforme BD ORTHO (Licence Ouverte / Open Licence Etalab 2.0)",
+            "Switzerland open imagery: © swisstopo — SWISSIMAGE (Open Government Data, free use with source attribution)",
+            "Netherlands open imagery: Beeldmateriaal Nederland / PDOK Luchtfoto (CC BY 4.0)",
+            "Spain open imagery: © Instituto Geográfico Nacional — PNOA (CC BY 4.0)",
+            "Austria open imagery: Datenquelle: basemap.at (CC BY 4.0)",
+            "Commercial fallback imagery (opt-in only): Esri World Imagery (© Esri, Maxar, Earthstar Geographics, and the GIS User Community) / Bing Maps Aerial (© Microsoft)",
+            "Flight plan route data: SimBrief / Navigraph (https://www.simbrief.com)",
             "WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos — https://github.com/winfsp/winfsp",
             "MapLibre GL JS — BSD-3-Clause",
-            "Mesh data © OpenStreetMap contributors (ODbL)",
-            "Elevation: USGS 3DEP (public domain) / Copernicus DEM",
-            "Imagery © the selected provider (Esri World Imagery or Bing Maps)",
         ]
     })
 }

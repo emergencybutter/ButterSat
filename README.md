@@ -8,8 +8,11 @@ reads it:
 - **meshes** (DSF) are downloaded on demand from a signed catalog, then
   completed locally with the water and season layers from your own X-Plane
   Global Scenery;
-- **textures** (DDS) are built on the fly from satellite imagery (Esri or
-  Bing), one band at a time, within a time budget so X-Plane never stalls.
+- **textures** (DDS) are built on the fly from open government orthophoto
+  imagery where available (US USGS, France IGN, Switzerland swisstopo,
+  Netherlands PDOK, Spain IGN PNOA, Austria basemap.at), with optional user
+  opt-in fallback to Esri or Bing, one band at a time, within a time budget so
+  X-Plane never stalls.
 
 Nothing to pre-download: install, launch, fly. Design: [`docs/design.md`](docs/design.md).
 
@@ -78,10 +81,11 @@ never contain Laminar data: `build` refuses DSFs with raster layers unless
 
 ## Licence and notices
 
-MIT — see [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
 
 - WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos —
   <https://github.com/winfsp/winfsp> (bundled unmodified under its FLOSS exception).
 - MapLibre GL JS (BSD-3-Clause), vendored in `crates/xof-ui/ui/vendor`.
-- Mesh data © OpenStreetMap contributors (ODbL); elevation: USGS 3DEP / Copernicus DEM.
-- Imagery belongs to the selected provider; use it according to their terms.
+- Mesh catalog published under ODbL 1.0 (`LICENSE` and `ATTRIBUTION` in `/v1/`): mesh data © OpenStreetMap contributors (ODbL 1.0); elevation: USGS 3DEP (public domain) / Copernicus DEM.
+- Open regional orthophoto imagery (used by default where available): USGS The National Map (US, public domain), IGN France Géoplateforme (Etalab 2.0), swisstopo SWISSIMAGE (CH, OGD), PDOK Luchtfoto (NL, CC BY 4.0), IGN PNOA (ES, CC BY 4.0), basemap.at (AT, CC BY 4.0).
+- Commercial imagery providers (Esri World Imagery, Bing Maps Aerial) are disabled by default and require explicit user opt-in in Settings.

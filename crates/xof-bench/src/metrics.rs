@@ -17,9 +17,24 @@ const CROP: f64 = 0.7;
 const MAX_SHIFT: i32 = 16;
 
 pub struct Luma {
-    w: usize,
-    h: usize,
-    px: Vec<f32>,
+    pub w: usize,
+    pub h: usize,
+    pub px: Vec<f32>,
+}
+
+pub fn full_luma(img: &DynamicImage) -> Luma {
+    let g: GrayImage = img.to_luma8();
+    Luma { w: g.width() as usize, h: g.height() as usize, px: g.into_raw().into_iter().map(|v| v as f32).collect() }
+}
+
+pub fn contrast(l: &Luma) -> f64 {
+    if l.px.is_empty() {
+        return 0.0;
+    }
+    let n = l.px.len() as f64;
+    let mean = l.px.iter().map(|&v| v as f64).sum::<f64>() / n;
+    let var = l.px.iter().map(|&v| (v as f64 - mean).powi(2)).sum::<f64>() / n;
+    var.sqrt()
 }
 
 pub fn analysis_image(img: &DynamicImage) -> Luma {

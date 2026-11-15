@@ -90,8 +90,9 @@ fn build_stack(
     xp: Option<&Path>,
     rt: &tokio::runtime::Handle,
 ) -> anyhow::Result<Stack> {
-    let provider = provider::builtin(&cfg.imagery.provider)
-        .ok_or_else(|| anyhow::anyhow!("unknown imagery provider '{}'", cfg.imagery.provider))?;
+    let provider =
+        provider::configured(&cfg.imagery.provider, cfg.imagery.prefer_open, cfg.imagery.provider_notice_accepted)
+            .ok_or_else(|| anyhow::anyhow!("unknown imagery provider '{}'", cfg.imagery.provider))?;
     let engine = {
         let _g = rt.enter();
         TextureEngine::new(
@@ -250,6 +251,7 @@ impl App {
             sim_loading: self.web.loading(),
             aircraft: self.web.aircraft.borrow().clone(),
             provider: stack.engine.provider().name().to_string(),
+            provider_attribution: stack.engine.provider().attribution().to_string(),
             engine: stack.engine.stats(),
             mesh: stack.mesh.as_ref().map(|m| m.status()),
             prefetch: self.prefetch.status(),
@@ -423,14 +425,34 @@ impl App {
                 }
             }
         }
-        if !cfg.imagery.provider_notice_accepted {
-            add(
-                "provider",
-                "Imagery provider",
-                Severity::Info,
-                format!("Using {} — review its terms of use in Settings", cfg.imagery.provider),
-                None,
-            );
+        let selected_non_open = provider::builtin(&cfg.imagery.provider).is_some_and(|p| !p.is_open());
+        if selected_non_open && !cfg.imagery.provider_notice_accepted {
+            if cfg.imagery.prefer_open {
+                add(
+                    "provider",
+                    "Imagery provider",
+                    Severity::Warn,
+                    format!(
+                        "Open regional imagery (US, FR, CH, NL, ES, AT) is active; {} fallback is disabled outside those regions until you accept its terms notice",
+                        cfg.imagery.provider
+                    ),
+                    Some("Review and accept the provider terms notice in Settings → Imagery to enable global fallback imagery."),
+                );
+            } else {
+                add(
+                    "provider",
+                    "Imagery provider",
+                    Severity::Error,
+                    format!(
+                        "{} is disabled until you accept its terms notice — no imagery will be fetched",
+                        cfg.imagery.provider
+                    ),
+                    Some("Accept the provider terms notice in Settings → Imagery, or enable open regional imagery."),
+                );
+            }
+        } else {
+            let prov_name = self.stack.lock().engine.provider().name().to_string();
+            add("provider", "Imagery provider", Severity::Ok, prov_name, None);
         }
         if cfg!(windows) {
             add("defender", "Windows Defender", Severity::Info, "Excluding the mount and cache folders from real-time scanning avoids needless downloads".into(), Some("The installer offers this; or add the folders under Windows Security → Virus & threat protection → Exclusions."));

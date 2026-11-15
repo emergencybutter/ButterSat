@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+xof-core.workspace = true
 xof-proto.workspace = true
 anyhow.workspace = true
 serde.workspace = true

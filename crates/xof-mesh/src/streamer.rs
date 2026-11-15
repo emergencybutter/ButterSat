@@ -70,6 +70,10 @@ pub struct MeshStats {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct MeshStatus {
     pub catalog_version: String,
+    #[serde(default)]
+    pub license: String,
+    #[serde(default)]
+    pub attribution: Vec<String>,
     pub online: bool,
     pub pending_update: Option<String>,
     pub tiles_in_catalog: usize,
@@ -507,6 +511,8 @@ impl MeshStreamer {
         let r = |a: &AtomicU64| a.load(Ordering::Relaxed);
         MeshStatus {
             catalog_version: m.catalog_version.clone(),
+            license: m.license.clone(),
+            attribution: m.attribution.clone(),
             online: self.is_online(),
             pending_update: self.pending.lock().as_ref().map(|p| p.catalog_version.clone()),
             tiles_in_catalog: m.tiles.len(),

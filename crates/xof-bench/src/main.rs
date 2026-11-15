@@ -56,6 +56,8 @@ enum Cmd {
     /// Fold the variant runs of other run folders into `into` (same scenario),
     /// replacing failed runs of the same variant, then rebuild the report.
     Merge { into: PathBuf, from: Vec<PathBuf> },
+    /// Compare open regional providers against Esri directly on tiles (no X-Plane).
+    Tiles,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -121,6 +123,151 @@ fn main() -> anyhow::Result<()> {
                 merge(&mut rec, &into, &load(dir)?, dir)?;
             }
             finish(&mut rec, &into, true)?;
+        }
+        Cmd::Tiles => rt.block_on(bench_tiles())?,
+    }
+    Ok(())
+}
+
+async fn bench_tiles() -> anyhow::Result<()> {
+    use xof_core::provider::{self, Fetched, Fetcher, Priority};
+    use xof_core::tile::TILE_PX;
+    use xof_core::{bc1, TileCoord};
+
+    struct Spot {
+        name: &'static str,
+        open_id: &'static str,
+        lat: f64,
+        lon: f64,
+    }
+    let spots = [
+        Spot { name: "NYC-JFK", open_id: "usgs", lat: 40.6413, lon: -73.7781 },
+        Spot { name: "NYC-CentralPark", open_id: "usgs", lat: 40.7812, lon: -73.9665 },
+        Spot { name: "NYC-LGA", open_id: "usgs", lat: 40.7769, lon: -73.8740 },
+        Spot { name: "Paris-CDG", open_id: "ign", lat: 49.0097, lon: 2.5479 },
+        Spot { name: "Zurich-ZRH", open_id: "swisstopo", lat: 47.4647, lon: 8.5492 },
+        Spot { name: "Amsterdam-AMS", open_id: "pdok", lat: 52.3105, lon: 4.7683 },
+        Spot { name: "Madrid-MAD", open_id: "pnoa", lat: 40.4983, lon: -3.5676 },
+        Spot { name: "Vienna-VIE", open_id: "basemap_at", lat: 48.1103, lon: 16.5697 },
+    ];
+
+    let mean_rgb = |rgba: &[u8]| -> [f64; 3] {
+        let n = (rgba.len() / 4).max(1) as f64;
+        let (mut r, mut g, mut b) = (0.0, 0.0, 0.0);
+        for px in rgba.chunks_exact(4) {
+            r += px[0] as f64;
+            g += px[1] as f64;
+            b += px[2] as f64;
+        }
+        [r / n, g / n, b / n]
+    };
+
+    let bc1_psnr = |tile: &xof_core::raster::Tile| -> f64 {
+        let enc = bc1::encode(tile);
+        let dec = bc1::decode(&enc, TILE_PX, TILE_PX);
+        let mut mse = 0.0f64;
+        let mut count = 0usize;
+        for (a, b) in tile.data.chunks_exact(4).zip(dec.data.chunks_exact(4)) {
+            for c in 0..3 {
+                let d = a[c] as f64 - b[c] as f64;
+                mse += d * d;
+                count += 1;
+            }
+        }
+        mse /= count.max(1) as f64;
+        if mse <= 1e-9 {
+            99.0
+        } else {
+            10.0 * (255.0 * 255.0 / mse).log10()
+        }
+    };
+
+    println!(
+        "{:<16} {:<4} {:<11} {:>8} {:>9} {:>9} {:>9} {:>17} {:>8}",
+        "Spot", "ZL", "Provider", "Bytes", "Sharpness", "Contrast", "BC1-PSNR", "Mean RGB", "vs-Esri"
+    );
+    println!("{}", "-".repeat(100));
+
+    let esri_fetcher = Fetcher::new(provider::builtin("esri").unwrap())?;
+
+    for s in &spots {
+        let open_p = provider::builtin(s.open_id).unwrap();
+        let open_fetcher = Fetcher::new(open_p.clone())?;
+        for &z in &[16u8, 17u8] {
+            let t = TileCoord::from_latlon(s.lat, s.lon, z);
+            let esri_fetched = esri_fetcher.fetch(t, Priority::Live).await.map_err(|e| anyhow::anyhow!(e))?;
+            let (esri_bytes, esri_tile) = match esri_fetched {
+                Fetched::Data(b) => (b.len(), provider::decode_tile(&b)?),
+                Fetched::NoData => continue,
+            };
+            let esri_luma = metrics::full_luma(&image::DynamicImage::ImageRgba8(
+                image::RgbaImage::from_raw(TILE_PX, TILE_PX, esri_tile.data.clone()).unwrap(),
+            ));
+            let esri_sharp = metrics::sharpness(&esri_luma);
+            let esri_cont = metrics::contrast(&esri_luma);
+            let esri_rgb = mean_rgb(&esri_tile.data);
+            let esri_psnr = bc1_psnr(&esri_tile);
+            println!(
+                "{:<16} z{:<3} {:<11} {:>8} {:>9.1} {:>9.1} {:>8.2}dB {:>5.0},{:>4.0},{:>4.0} {:>8}",
+                s.name,
+                z,
+                "esri",
+                esri_bytes,
+                esri_sharp,
+                esri_cont,
+                esri_psnr,
+                esri_rgb[0],
+                esri_rgb[1],
+                esri_rgb[2],
+                "ref"
+            );
+
+            // Open provider (at z17 for max_zoom=16 providers like USGS, upscale z16 ancestor 2x as engine does):
+            let (open_label, open_bytes, open_tile) = if z > open_p.max_zoom() {
+                let k = z - open_p.max_zoom();
+                let a = t.ancestor(k).unwrap();
+                match open_fetcher.fetch(a, Priority::Live).await.map_err(|e| anyhow::anyhow!(e))? {
+                    Fetched::Data(b) => {
+                        let parent = provider::decode_tile(&b)?;
+                        let size = TILE_PX as f32 / (1u32 << k) as f32;
+                        let sx = (t.x - (a.x << k)) as f32 * size;
+                        let sy = (t.y - (a.y << k)) as f32 * size;
+                        (
+                            format!("{}↑z{}", s.open_id, open_p.max_zoom()),
+                            b.len(),
+                            parent.crop_scale(sx, sy, size, TILE_PX),
+                        )
+                    }
+                    Fetched::NoData => continue,
+                }
+            } else {
+                match open_fetcher.fetch(t, Priority::Live).await.map_err(|e| anyhow::anyhow!(e))? {
+                    Fetched::Data(b) => (s.open_id.to_string(), b.len(), provider::decode_tile(&b)?),
+                    Fetched::NoData => continue,
+                }
+            };
+            let open_luma = metrics::full_luma(&image::DynamicImage::ImageRgba8(
+                image::RgbaImage::from_raw(TILE_PX, TILE_PX, open_tile.data.clone()).unwrap(),
+            ));
+            let open_sharp = metrics::sharpness(&open_luma);
+            let open_cont = metrics::contrast(&open_luma);
+            let open_rgb = mean_rgb(&open_tile.data);
+            let open_psnr = bc1_psnr(&open_tile);
+            let ssim = metrics::ssim_at(&open_luma, &esri_luma, 0, 0);
+            println!(
+                "{:<16} z{:<3} {:<11} {:>8} {:>9.1} {:>9.1} {:>8.2}dB {:>5.0},{:>4.0},{:>4.0} {:>8.3}",
+                s.name,
+                z,
+                open_label,
+                open_bytes,
+                open_sharp,
+                open_cont,
+                open_psnr,
+                open_rgb[0],
+                open_rgb[1],
+                open_rgb[2],
+                ssim
+            );
         }
     }
     Ok(())

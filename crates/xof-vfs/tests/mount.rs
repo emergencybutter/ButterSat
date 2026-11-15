@@ -187,7 +187,9 @@ fn mount_and_read_through_os() {
     let mut names: Vec<String> =
         std::fs::read_dir(&mnt).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
     names.sort();
-    assert_eq!(names, ["Earth nav data", "library.txt", "terrain", "textures"]);
+    assert_eq!(names, ["Earth nav data", "README.txt", "library.txt", "terrain", "textures"]);
+    let readme = std::fs::read_to_string(mnt.join("README.txt")).unwrap();
+    assert!(readme.contains("OpenStreetMap") && readme.contains("ODbL"), "{readme}");
     let mut folders: Vec<String> = std::fs::read_dir(mnt.join("Earth nav data"))
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())

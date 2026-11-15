@@ -186,3 +186,10 @@ input, select, textarea {
 .sw.cache { background: rgba(58, 110, 165, .55); }
 .sw.pf { background: rgba(255, 196, 0, .35); border: 1px solid #ffc400; }
 .settings progress { width: 100%; height: 8px; }
+.attribution-footer {
+  margin-top: 8px;
+  padding: 6px 4px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}

@@ -94,6 +94,11 @@
         <h3>Health</h3>
         <ul id="health" class="health"></ul>
       </div>
+      <footer class="attribution-footer" id="overview-footer">
+        <span id="o-attrib-imagery">Imagery: Open regional imagery (USGS, IGN, swisstopo, PDOK, IGN PNOA, basemap.at)</span>
+        <span> · </span>
+        <span id="o-attrib-mesh">Mesh &amp; water masks: © OpenStreetMap contributors (ODbL 1.0) · Elevation: USGS 3DEP</span>
+      </footer>
     </section>
 
     <section id="map" class="view">
@@ -118,7 +123,7 @@
       </div>
       <div class="card">
         <h3>SimBrief route</h3>
-        <p class="muted">Prefetch meshes and low-resolution imagery along your latest SimBrief flight plan.</p>
+        <p class="muted">Prefetch meshes and low-resolution imagery along your latest SimBrief flight plan. Flight plan data provided by SimBrief / Navigraph (simbrief.com).</p>
         <form id="f-route" class="row">
           <input id="sb-user" placeholder="SimBrief username or pilot ID" autocomplete="off">
           <button class="primary">Prefetch route</button>
@@ -164,11 +169,23 @@
         <progress id="st-progress" class="hidden" max="100" value="0"></progress>
 
         <h3>Imagery</h3>
-        <label>Provider
-          <select name="imagery.provider"><option value="esri">Esri World Imagery</option><option value="bing">Bing Maps Aerial</option></select>
+        <label class="check"><input type="checkbox" name="imagery.prefer_open">
+          Prefer open government orthophoto imagery where available (US USGS, France IGN, Switzerland swisstopo, Netherlands PDOK, Spain IGN PNOA, Austria basemap.at).</label>
+        <label>Global fallback / fixed provider
+          <select name="imagery.provider">
+            <option value="esri">Esri World Imagery (global fallback — opt-in required)</option>
+            <option value="bing">Bing Maps Aerial (global fallback — opt-in required)</option>
+            <option value="open">Open regional imagery only (no commercial fallback)</option>
+            <option value="usgs">USGS The National Map (US only, public domain)</option>
+            <option value="ign">IGN Géoplateforme (France only, Etalab 2.0)</option>
+            <option value="swisstopo">swisstopo SWISSIMAGE (Switzerland only, OGD)</option>
+            <option value="pdok">PDOK Luchtfoto (Netherlands only, CC BY 4.0)</option>
+            <option value="pnoa">IGN PNOA (Spain only, CC BY 4.0)</option>
+            <option value="basemap_at">basemap.at (Austria only, CC BY 4.0)</option>
+          </select>
         </label>
         <label class="check"><input type="checkbox" name="imagery.provider_notice_accepted">
-          I have read the provider's terms of use and use the imagery for personal flight simulation only.</label>
+          <span>I understand that Esri World Imagery and Bing Maps Aerial are commercial services whose public terms do not explicitly grant standalone third-party flight-simulator streaming rights, and I explicitly opt in to fetching from my chosen provider for personal flight-simulation use at my own responsibility. (Until checked, ButterSat never fetches from Esri or Bing.)</span></label>
         <label>Read time budget (ms)<input type="number" name="imagery.deadline_ms" min="200" max="10000" step="100"></label>
         <label>Imagery cache size (GB)<input type="number" name="imagery.cache_size_gb" min="5" max="2000"></label>
         <label>Texture RAM (MB)<input type="number" name="imagery.segment_ram_mb" min="128" max="16384" step="128"></label>
@@ -209,6 +226,7 @@
           <button type="button" id="btn-check-update">Check for updates</button>
           <span id="about-update" class="result"></span>
         </div>
+        <p id="about-active-attrib" class="muted"></p>
         <ul id="notices" class="list small"></ul>
       </div>
     </section>

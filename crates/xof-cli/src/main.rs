@@ -127,15 +127,22 @@ fn print_status(s: &Status) {
         "  imagery:     {}  reads {}  tiles fetched {}  degraded {}  upgrades {}",
         s.provider, s.engine.reads, s.engine.fetch_requests, s.engine.degraded_built, s.engine.upgrades
     );
+    if !s.provider_attribution.is_empty() {
+        println!("  attribution: {}", s.provider_attribution);
+    }
     if let Some(m) = &s.mesh {
         println!(
-            "  mesh:        catalog {} ({} tiles, {}){}  downloads {}",
+            "  mesh:        catalog {} ({} tiles, {}, {}){}  downloads {}",
             m.catalog_version,
             m.tiles_in_catalog,
             if m.online { "online" } else { "offline" },
+            if m.license.is_empty() { "ODbL-1.0" } else { &m.license },
             m.pending_update.as_deref().map(|v| format!(", update {v} pending")).unwrap_or_default(),
             m.downloads
         );
+        if !m.attribution.is_empty() {
+            println!("  mesh attr:   {}", m.attribution.join(" · "));
+        }
     }
     println!(
         "  prefetch:    queued {}  mesh {}  imagery {}{}",

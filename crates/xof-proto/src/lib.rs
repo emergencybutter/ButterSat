@@ -188,6 +188,8 @@ pub struct Status {
     pub sim_loading: bool,
     pub aircraft: Option<AircraftState>,
     pub provider: String,
+    #[serde(default)]
+    pub provider_attribution: String,
     pub engine: EngineStatsSnapshot,
     pub mesh: Option<MeshStatus>,
     pub prefetch: PrefetchStatus,

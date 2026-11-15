@@ -196,6 +196,10 @@ impl TextureEngine {
         self.inner.fetcher.provider()
     }
 
+    fn effective_provider(&self, t: TileCoord) -> Arc<dyn Provider> {
+        self.provider().resolve(t).unwrap_or_else(|| self.provider().clone())
+    }
+
     pub fn store(&self) -> &Arc<TileStore> {
         &self.inner.store
     }
@@ -343,7 +347,19 @@ impl TextureEngine {
 
     /// Make sure a raw imagery tile is in T1 (prefetch). Never decodes.
     pub async fn warm_tile(&self, t: TileCoord) -> bool {
-        let provider = self.provider().id().to_string();
+        if !self.provider().can_fetch(t) {
+            return false;
+        }
+        let eff = self.effective_provider(t);
+        let t = if t.z > eff.max_zoom() {
+            match t.ancestor(t.z - eff.max_zoom()) {
+                Some(a) => a,
+                None => return false,
+            }
+        } else {
+            t
+        };
+        let provider = eff.id().to_string();
         let store = self.inner.store.clone();
         let cached = tokio::task::spawn_blocking(move || store.get(&provider, t).ok().flatten()).await.ok().flatten();
         if cached.is_some() {
@@ -351,7 +367,7 @@ impl TextureEngine {
         }
         match self.inner.fetcher.fetch(t, Priority::Background).await {
             Ok(f) => {
-                self.store_put(t, f).await;
+                self.store_put(&eff, t, f).await;
                 true
             }
             Err(_) => false,
@@ -498,47 +514,79 @@ impl TextureEngine {
     /// tiles are filled from ancestors. Returns images and whether any was a
     /// temporary (upgradable) fill.
     async fn gather(&self, tex: &TextureId, tiles: &[TileCoord], ctx: ReadCtx) -> (Vec<Arc<Tile>>, bool) {
+        let allow_net = |t: TileCoord| ctx.class == ReaderClass::XPlane || t.z + 2 <= tex.zl;
         let handles: Vec<_> = tiles
             .iter()
             .map(|&t| {
                 let this = self.clone();
-                let allow_net = ctx.class == ReaderClass::XPlane || t.z + 2 <= tex.zl;
-                tokio::spawn(async move { this.tile(t, Priority::Live, allow_net).await })
+                let net = allow_net(t);
+                tokio::spawn(async move { this.tile(t, Priority::Live, net).await })
             })
             .collect();
-        let mut out = Vec::with_capacity(tiles.len());
-        let mut degraded = false;
+        let mut states = Vec::with_capacity(tiles.len());
         for (h, &t) in handles.into_iter().zip(tiles) {
             let state = match tokio::time::timeout_at(ctx.deadline, h).await {
                 Ok(Ok(s)) => s,
                 _ => TileState::Unavailable,
             };
-            match state {
-                TileState::Data(img) => out.push(img),
-                TileState::NoData => out.push(self.fallback(t).await.0),
-                TileState::Unavailable => {
-                    degraded = true;
-                    out.push(self.fallback(t).await.0);
+            states.push((t, state));
+        }
+        let resolved = futures::future::join_all(states.into_iter().map(|(t, state)| {
+            let this = self.clone();
+            let net = allow_net(t);
+            async move {
+                match state {
+                    TileState::Data(img) => (img, false),
+                    TileState::NoData => this.fallback(t, net.then_some(ctx.deadline)).await,
+                    TileState::Unavailable => (this.fallback(t, None).await.0, true),
                 }
             }
+        }))
+        .await;
+        let mut out = Vec::with_capacity(tiles.len());
+        let mut degraded = false;
+        for (img, deg) in resolved {
+            out.push(img);
+            degraded |= deg;
         }
         (out, degraded)
     }
 
-    /// Best local (no network) stand-in for tile `t`: an upscaled crop of the
-    /// nearest cached ancestor, or a neutral placeholder.
-    async fn fallback(&self, t: TileCoord) -> (Arc<Tile>, bool) {
+    /// Best stand-in for tile `t`: an upscaled crop of the nearest ancestor, or
+    /// a neutral placeholder. When `t.z > eff.max_zoom()` and `net_deadline` is
+    /// set, the ancestor at `eff.max_zoom()` may be fetched over the network.
+    /// Returns `(image, timed_out_at_max_zoom)`.
+    async fn fallback(&self, t: TileCoord, net_deadline: Option<Instant>) -> (Arc<Tile>, bool) {
+        let max_z = self.effective_provider(t).max_zoom();
+        let mut timed_out = false;
         for k in 1..=self.inner.cfg.max_fallback_levels.min(t.z) {
             let a = t.ancestor(k).unwrap();
-            if let TileState::Data(img) = self.tile(a, Priority::Live, false).await {
+            let state = match net_deadline {
+                Some(dl) if t.z > max_z && a.z == max_z => {
+                    match tokio::time::timeout_at(dl, self.tile(a, Priority::Live, true)).await {
+                        Ok(s) => {
+                            if matches!(s, TileState::Unavailable) {
+                                timed_out = true;
+                            }
+                            s
+                        }
+                        Err(_) => {
+                            timed_out = true;
+                            TileState::Unavailable
+                        }
+                    }
+                }
+                _ => self.tile(a, Priority::Live, false).await,
+            };
+            if let TileState::Data(img) = state {
                 let size = TILE_PX as f32 / (1u32 << k) as f32;
                 let sx = (t.x - (a.x << k)) as f32 * size;
                 let sy = (t.y - (a.y << k)) as f32 * size;
                 let scaled = self.cpu(move || img.crop_scale(sx, sy, size, TILE_PX)).await;
-                return (Arc::new(scaled), true);
+                return (Arc::new(scaled), timed_out);
             }
         }
-        (Arc::new(placeholder_tile()), false)
+        (Arc::new(placeholder_tile()), timed_out)
     }
 
     /// Decoded tile from RAM, T1, or (if allowed) the network.
@@ -546,14 +594,18 @@ impl TextureEngine {
         if let Some(img) = self.inner.decoded.get(&t) {
             return TileState::Data(img);
         }
-        let provider = self.provider().id().to_string();
+        let eff = self.effective_provider(t);
+        if t.z > eff.max_zoom() {
+            return TileState::NoData;
+        }
+        let provider = eff.id().to_string();
         let store = self.inner.store.clone();
         let cached = tokio::task::spawn_blocking(move || store.get(&provider, t).ok().flatten()).await.ok().flatten();
         let fetched = match cached {
             Some(f) => f,
-            None if allow_net => match self.inner.fetcher.fetch(t, prio).await {
+            None if allow_net && self.provider().can_fetch(t) => match self.inner.fetcher.fetch(t, prio).await {
                 Ok(f) => {
-                    self.store_put(t, f.clone()).await;
+                    self.store_put(&eff, t, f.clone()).await;
                     f
                 }
                 Err(e) => {
@@ -583,8 +635,8 @@ impl TextureEngine {
         }
     }
 
-    async fn store_put(&self, t: TileCoord, f: Fetched) {
-        let provider = self.provider().id().to_string();
+    async fn store_put(&self, eff: &Arc<dyn Provider>, t: TileCoord, f: Fetched) {
+        let provider = eff.id().to_string();
         let store = self.inner.store.clone();
         let _ = tokio::task::spawn_blocking(move || {
             if let Err(e) = store.put(&provider, t, &f) {
@@ -609,11 +661,19 @@ impl TextureEngine {
                 Segment::Tail => vec![tex.origin_at(4)],
                 Segment::Header => vec![],
             };
+            if tiles.iter().any(|&t| !this.provider().can_fetch(t)) {
+                this.inner.upgrading.lock().remove(&key);
+                return;
+            }
             // Wait (no deadline) for the real imagery at background priority.
-            let all_ok = futures::future::join_all(tiles.iter().map(|&t| this.tile(t, Priority::Background, true)))
-                .await
-                .iter()
-                .all(|s| !matches!(s, TileState::Unavailable));
+            let all_ok = futures::future::join_all(tiles.iter().map(|&t| {
+                let max_z = this.effective_provider(t).max_zoom();
+                let target = if t.z > max_z { t.ancestor(t.z - max_z).unwrap_or(t) } else { t };
+                this.tile(target, Priority::Background, true)
+            }))
+            .await
+            .iter()
+            .all(|s| !matches!(s, TileState::Unavailable));
             let still_reduced = matches!(seg, Segment::Band { mip: 0, .. }) && this.reduced_zoom();
             if all_ok && !still_reduced {
                 let ctx = ReadCtx { deadline: Instant::now() + Duration::from_secs(60), class: ReaderClass::XPlane };

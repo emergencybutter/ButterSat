@@ -1,0 +1,114 @@
+ButterSat — Legal Notices & Data Attributions
+=============================================
+
+1. Software License
+-------------------
+ButterSat (the daemon, virtual filesystem, CLI, publisher, and control UI) is
+open-source software licensed under the MIT License (see LICENSE).
+
+
+2. Mesh & Elevation Catalog (ODbL 1.0)
+--------------------------------------
+The pre-built X-Plane 12 terrain mesh catalogs (`.dsf.zst`) and coastline/water
+masks (`.png`) distributed for ButterSat are licensed under the Open Data
+Commons Open Database License (ODbL) v1.0:
+  https://opendatacommons.org/licenses/odbl/1-0/
+
+Required attributions for the mesh catalog:
+  * Mesh & water vector data: © OpenStreetMap contributors
+    (https://www.openstreetmap.org/copyright), available under ODbL 1.0.
+    Derived from OpenStreetMap coastlines (`natural=coastline`), inland water
+    polygons, airport boundaries (`aeroway=*`), and road flatten networks.
+  * United States elevation data: U.S. Geological Survey (USGS) 3D Elevation
+    Program (3DEP) 1/3 arc-second Digital Elevation Model
+    (https://www.usgs.gov/3d-elevation-program) — public domain (17 U.S.C. § 105).
+  * Global elevation data (outside US): Copernicus DEM GLO-30
+    (© DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018;
+    provided under the European Union Copernicus free, full, and open data
+    policy).
+
+Note on X-Plane Global Scenery:
+  Published catalog DSFs contain zero Laminar Research raster layers (`sim/overlay`
+  and `DMED`/`SDME` atoms are stripped prior to publication). At runtime,
+  `xof-daemon` splices those raster layers locally on the user's machine from
+  the user's own licensed X-Plane 12 Global Scenery installation.
+
+
+3. Open Regional Orthophoto Imagery (Default Where Available)
+-------------------------------------------------------------
+Where open government orthophoto coverage exists, ButterSat automatically
+selects the open regional provider by default:
+
+  * United States (`usgs`):
+    U.S. Geological Survey (USGS) The National Map (`USGSImageryOnly` — USDA
+    FSA NAIP 1 m and USGS High Resolution Orthoimagery).
+    License: Public domain (17 U.S.C. § 105; USGS data have no copyright or
+    licensing restrictions).
+    Attribution: "Imagery: U.S. Geological Survey (USGS) The National Map
+    (3DEP / NAIP, public domain)".
+
+  * France (`ign`):
+    Institut national de l'information géographique et forestière (IGN) —
+    Géoplateforme `HR.ORTHOIMAGERY.ORTHOPHOTOS` (BD ORTHO 20 cm).
+    License: Licence Ouverte / Open Licence v2.0 (Etalab 2.0).
+    Attribution: "Imagery © IGN France — Géoplateforme BD ORTHO (Licence
+    Ouverte / Open Licence Etalab 2.0)".
+
+  * Switzerland & Liechtenstein (`swisstopo`):
+    Federal Office of Topography swisstopo — `ch.swisstopo.swissimage` (10 cm).
+    License: Open Government Data (OGD) Switzerland — free use (including
+    commercial) with mandatory source attribution.
+    Attribution: "Imagery © swisstopo (SWISSIMAGE, Open Government Data)".
+
+  * Netherlands (`pdok`):
+    Publieke Dienstverlening Op de Kaart (PDOK) / Beeldmateriaal Nederland —
+    `Actueel_orthoHR` (7.5–25 cm).
+    License: Creative Commons Attribution 4.0 International (CC BY 4.0).
+    Attribution: "Imagery: Beeldmateriaal Nederland / PDOK Luchtfoto (CC BY 4.0)".
+
+  * Spain (`pnoa`):
+    Instituto Geográfico Nacional (IGN) / Centro Nacional de Información
+    Geográfica (CNIG) — Plan Nacional de Ortofotografía Aérea (`OI.OrthoimageCoverage`,
+    25 cm).
+    License: Creative Commons Attribution 4.0 International (CC BY 4.0).
+    Attribution: "Imagery © Instituto Geográfico Nacional — PNOA (CC BY 4.0)".
+
+  * Austria (`basemap_at`):
+    Verwaltungskooperation geoland.at / basemap.at — `bmaporthofoto30cm` (30 cm).
+    License: Creative Commons Attribution 4.0 International (CC BY 4.0).
+    Attribution: "Imagery: Datenquelle: basemap.at (CC BY 4.0)".
+
+
+4. Optional Commercial Imagery Providers (User Opt-In Only)
+-----------------------------------------------------------
+ButterSat does not redistribute any aerial or satellite imagery. Outside open
+regional coverage, the daemon does not fetch from commercial imagery services
+unless the user explicitly accepts the provider notice in Settings:
+
+  * Esri World Imagery (`esri`):
+    "Imagery © Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+    (Esri Master Agreement / ArcGIS Online Terms of Use).
+
+  * Bing Maps Aerial (`bing`):
+    "Imagery © Microsoft Bing Maps (Maxar, Earthstar Geographics, Vexcel)"
+    (Microsoft Bing Maps Platform APIs Terms of Use).
+
+
+5. Flight Plan Route Prefetch
+-----------------------------
+  * SimBrief (`simbrief.com`):
+    Optional route prefetch retrieves the user's latest Operational Flight Plan
+    (OFP) via SimBrief's `xml.fetcher.php` endpoint on explicit user request.
+    Flight plan data provided by SimBrief / Navigraph (https://www.simbrief.com).
+
+
+6. Third-Party Software Notices
+-------------------------------
+  * WinFsp — Windows File System Proxy
+    Copyright (C) Bill Zissimopoulos (https://github.com/winfsp/winfsp)
+    Licensed under GPLv3 with the FLOSS Special Exception permitting linking
+    from MIT-licensed software.
+
+  * MapLibre GL JS (bundled in `crates/xof-ui/ui/vendor/maplibre-gl-5.24.0/`)
+    Copyright (c) MapLibre contributors
+    Licensed under the BSD 3-Clause License.

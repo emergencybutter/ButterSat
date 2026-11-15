@@ -21,6 +21,13 @@ impl TileCoord {
         Self { z, x, y }
     }
 
+    /// Tile containing `(lat, lon)` at zoom `z`.
+    pub fn from_latlon(lat: f64, lon: f64, z: u8) -> Self {
+        let (x, y) = latlon_to_tile(lat, lon, z);
+        let max = ((1u64 << z) - 1) as f64;
+        Self::new(z, x.floor().clamp(0.0, max) as u32, y.floor().clamp(0.0, max) as u32)
+    }
+
     /// The tile `levels` zoom levels up that contains this one.
     pub fn ancestor(self, levels: u8) -> Option<TileCoord> {
         if levels > self.z {

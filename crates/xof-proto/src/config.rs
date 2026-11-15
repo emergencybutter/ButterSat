@@ -75,9 +75,13 @@ impl Default for MountConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ImageryConfig {
-    /// `esri` or `bing`.
+    /// Global/selected provider: `open`, `usgs`, `ign`, `swisstopo`, `pdok`, `pnoa`, `basemap_at`, `esri`, or `bing`.
     pub provider: String,
-    /// The user acknowledged the provider's terms notice.
+    /// Prefer open regional imagery (USGS, IGN, swisstopo, PDOK, PNOA, basemap.at) where coverage exists,
+    /// falling back to `provider` elsewhere.
+    pub prefer_open: bool,
+    /// The user explicitly acknowledged the commercial provider's (Esri/Bing) terms notice.
+    /// Until true, the daemon never fetches from non-open providers.
     pub provider_notice_accepted: bool,
     /// Live-read budget in flight.
     pub deadline_ms: u64,
@@ -99,6 +103,7 @@ impl Default for ImageryConfig {
     fn default() -> Self {
         Self {
             provider: "esri".into(),
+            prefer_open: true,
             provider_notice_accepted: false,
             deadline_ms: 1200,
             loading_deadline_ms: 20_000,

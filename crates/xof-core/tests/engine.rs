@@ -272,3 +272,71 @@ fn texture_tiles_cover_all_mips() {
     assert!(tiles.contains(&xof_core::TileCoord::new(16, 19344, 24560)));
     assert!(tiles.contains(&xof_core::TileCoord::new(16, 19359, 24575)));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn max_zoom_provider_upscales_ancestor_for_zl17_and_blocks_without_optin() {
+    struct MockMax16 {
+        base: String,
+        open: bool,
+    }
+    impl Provider for MockMax16 {
+        fn id(&self) -> &str {
+            "mock16"
+        }
+        fn name(&self) -> &str {
+            "Mock Max 16"
+        }
+        fn is_open(&self) -> bool {
+            self.open
+        }
+        fn filename_codes(&self) -> &[&str] {
+            &["XO"]
+        }
+        fn max_zoom(&self) -> u8 {
+            16
+        }
+        fn tile_url(&self, t: TileCoord) -> String {
+            format!("{}/{}/{}/{}", self.base, t.z, t.x, t.y)
+        }
+        fn is_no_data(&self, status: u16, _: &reqwest::header::HeaderMap, body: &[u8]) -> bool {
+            status == 404 || body.is_empty()
+        }
+    }
+
+    let (base, hits) = serve(255, Duration::ZERO).await;
+    let dir = tempfile::tempdir().unwrap();
+
+    // 1. Commercial provider without opt-in must never hit the network:
+    let blocked_prov = Arc::new(xof_core::provider::CoverageProvider::new(
+        Some(Arc::new(MockMax16 { base: base.clone(), open: false })),
+        false,
+        false,
+    ));
+    let store_blocked = TileStore::open(&dir.path().join("blocked.redb")).unwrap();
+    let e_blocked = TextureEngine::new(
+        EngineConfig { deadline_ms: 2000, read_ahead: false, ..Default::default() },
+        blocked_prov,
+        store_blocked,
+    )
+    .unwrap();
+    let m0 = Segment::Band { mip: 0, band: 0 };
+    e_blocked.read(&tex(), m0.offset(), 8, e_blocked.live_ctx()).await.unwrap();
+    assert_eq!(hits.distinct(), 0, "must not fetch when notice_accepted is false");
+
+    // 2. Open provider with max_zoom = 16 serving a ZL17 airport texture:
+    // mip 0 (z17) should automatically fetch and upscale the 8 parent z16 tiles without degrading.
+    let open_prov = Arc::new(MockMax16 { base, open: true });
+    let store_open = TileStore::open(&dir.path().join("open.redb")).unwrap();
+    let e_open = TextureEngine::new(
+        EngineConfig { deadline_ms: 5000, read_ahead: false, ..Default::default() },
+        open_prov,
+        store_open,
+    )
+    .unwrap();
+    let tex17 = TextureId::new(49120, 38688, 17, "XO");
+    let data = e_open.read(&tex17, m0.offset(), 8, e_open.live_ctx()).await.unwrap();
+    assert!(close(bc1::decode(&data, 4, 4).px(0, 0), color(16)), "upscaled from z16 parent");
+    assert_eq!(hits.at_zoom(17), 0, "no z17 requests beyond max_zoom=16");
+    assert_eq!(hits.at_zoom(16), 8, "fetched 8 parent z16 tiles for the 16-tile z17 band");
+    assert!(!e_open.is_degraded(&tex17));
+}

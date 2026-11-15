@@ -20,6 +20,8 @@ use xof_core::DsfTile;
 pub const FORMAT: u32 = 1;
 pub const MANIFEST_FILE: &str = "manifest.json.zst";
 pub const SIGNATURE_FILE: &str = "manifest.json.zst.sig";
+pub const LICENSE_FILE: &str = "LICENSE";
+pub const ATTRIBUTION_FILE: &str = "ATTRIBUTION";
 
 /// One hosted object.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,6 +65,17 @@ pub struct TileEntry {
     pub zl: ZoomInfo,
 }
 
+fn default_license() -> String {
+    "ODbL-1.0".into()
+}
+
+fn default_attribution() -> Vec<String> {
+    vec![
+        "Mesh data © OpenStreetMap contributors (ODbL 1.0)".into(),
+        "Elevation data: USGS 3DEP (public domain) / Copernicus DEM".into(),
+    ]
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
     pub format: u32,
@@ -70,9 +83,11 @@ pub struct Manifest {
     pub generated_at: String,
     #[serde(default)]
     pub build_config: String,
+    #[serde(default = "default_license")]
+    pub license: String,
     #[serde(default)]
     pub mirrors: Vec<String>,
-    #[serde(default)]
+    #[serde(default = "default_attribution")]
     pub attribution: Vec<String>,
     /// Keyed by DSF tile name (`+40-074`).
     pub tiles: BTreeMap<String, TileEntry>,
@@ -85,8 +100,9 @@ impl Manifest {
             catalog_version: "empty".into(),
             generated_at: String::new(),
             build_config: String::new(),
+            license: default_license(),
             mirrors: vec![],
-            attribution: vec![],
+            attribution: default_attribution(),
             tiles: BTreeMap::new(),
         }
     }
