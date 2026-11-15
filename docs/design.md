@@ -260,6 +260,15 @@ If the band's tiles aren't all available by the deadline:
 
 Degraded-band counts are a first-class metric in the UI.
 
+**Measured in X-Plane 12.4 (xof-bench, §19):** X-Plane reads each texture
+once per load and never re-reads it, so a band served degraded during the
+initial load stays degraded for the session (35 % of bands in one cold start
+at JFK); upgrades only help later loads. While X-Plane shows its loading
+screen there is no frame to protect, so the daemon detects the load (Web API
+silent, frames > 250 ms, or not connected) and uses
+`imagery.loading_deadline_ms` (20 s) instead of `deadline_ms` (1.2 s). In
+flight, scenery loads asynchronously: slow reads caused no stalls.
+
 ### 5.5 Dynamic zoom (M3)
 Above a configurable AGL threshold, mip 0 of a ZL Z texture is built from ZL
 Z-1 tiles (upscaled) instead of ZL Z — ~75% fewer downloads at cruise. Below
@@ -692,8 +701,34 @@ All milestones M1–M5 are implemented on branch `impl`; spike results are in
 ### Open items
 
 - Run the macOS (macFUSE FSKit mode) and Linux FUSE mounts on real machines.
-- Fly the NYC pilot in X-Plane 12 (M1 acceptance) and tune `deadline_ms`.
+- ~~Fly the NYC pilot in X-Plane 12~~: replaced by automated in-sim runs (§19).
+- Cold start (see §19): deferred ideas, cheaper handling of X-Plane's 64 KiB
+  probe and a pre-warm targeted at what X-Plane reads.
 - Local Overpass for the build pipeline; skip all-ocean tiles automatically.
 - Host the catalog (R2 and/or self-hosted) and embed the release key.
 - Build signed installers (`scripts/stage-release.ps1`, `cargo tauri build`).
 
+
+---
+
+## 19. In-sim results (xof-bench, 2026-11-15)
+
+`xof-bench` ([`bench.md`](bench.md)) drives X-Plane 12.4.4 through the Web
+API: flight start, frozen aircraft, nadir camera, closed-loop slew between
+spots, timed screenshots scored against a reference variant (aligned SSIM),
+frame stalls, and daemon counters. NYC pilot, other Custom Scenery disabled.
+
+| Finding | Numbers |
+|---|---|
+| Streaming works in X-Plane: meshes, masks, textures in place | similarity to the Ortho4XP pack 0.91–0.99 at land spots (default scenery 0.12–0.78) |
+| Remaining gap to the reference is the BC1 encoder, not blur | xof crisper/blockier than nvcompress; gap identical with 0 degraded bands |
+| In-flight streaming costs nothing measurable | 186 km leg at 450 kt: 1 stall > 100 ms for default and xof alike; xof 72 fps vs 61 |
+| Prefetch keeps flight quality at full | 2 degraded bands out of 10 379 reads |
+| Cold start at JFK (empty caches) | ~90 s (90–140 s with Esri latency) vs 35 s for the static pack; 50 s with a warm imagery cache |
+| X-Plane read pattern (trace) | 1657 textures touched at a JFK start; each opens with a 64 KiB read at offset 0; 1391 then read at mip 3 only |
+| No gain | fetch concurrency 16→64; mip-aware read-ahead (+44 % bands, 110 s; off by default); 40 km full-texture pre-warm |
+
+Other changes driven by the bench: catalog client prefers the last good
+mirror; loading-phase read budget (§5.4); phase-dependent fetch concurrency
+(`imagery.max_requests` 32 / `loading_max_requests` 64); DSF-aware pre-warm
+(prepare departure, X-Plane's `last.pos`).
