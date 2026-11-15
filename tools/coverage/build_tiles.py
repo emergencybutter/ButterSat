@@ -63,7 +63,47 @@ def log(msg):
         f.write(line + "\n")
 
 
+# NED 1/3" covers the US only: tiles on the Canadian/Mexican border end up
+# with nodata elevation and Ortho4XP's DSF step fails ("cannot convert float
+# NaN to integer"). NED 1" also covers Canada and Mexico.
+DEM_FALLBACK = 'NED 1" (from USGS) - USA, Canada, Mexico'
+
+
+def set_tile_dem(o4, lat, lon, dem):
+    """Write custom_dem into the tile's own Ortho4XP config (read by the CLI)."""
+    t = tile_name(lat, lon)
+    d = os.path.join(o4, "Tiles", f"zOrtho4XP_{t}")
+    os.makedirs(d, exist_ok=True)
+    cfg = os.path.join(d, f"Ortho4XP_{t}.cfg")
+    lines = open(cfg, encoding="utf-8").read().splitlines() if os.path.exists(cfg) else []
+    lines = [l for l in lines if not l.startswith("custom_dem=")] + [f"custom_dem={dem}"]
+    with open(cfg, "w", encoding="utf-8") as f:
+        f.writelines(line + "\n" for line in lines)
+    # The elevation is baked into the intermediate files: rebuild them.
+    for ext in ("alt", "mesh", "node", "poly", "apt"):
+        f = os.path.join(d, f"Data{t}.{ext}")
+        if os.path.exists(f):
+            os.remove(f)
+
+
 def build(o4, lat, lon, timeout_s):
+    status, reason, secs = build_once(o4, lat, lon, timeout_s)
+    if status == "failed" and "NaN" in reason_text(lat, lon):
+        log(f"retry {tile_name(lat, lon)} with {DEM_FALLBACK} (nodata elevation, border tile)")
+        set_tile_dem(o4, lat, lon, DEM_FALLBACK)
+        status, reason, secs2 = build_once(o4, lat, lon, timeout_s)
+        secs += secs2
+        if status == "done":
+            reason = "DEM fallback: NED 1\""
+    return status, reason, secs
+
+
+def reason_text(lat, lon):
+    p = os.path.join(ROOT, "logs", "tiles", f"{tile_name(lat, lon)}.log")
+    return open(p, encoding="utf-8", errors="replace").read() if os.path.exists(p) else ""
+
+
+def build_once(o4, lat, lon, timeout_s):
     t = tile_name(lat, lon)
     logf = os.path.join(ROOT, "logs", "tiles", f"{t}.log")
     t0 = time.time()
