@@ -25,3 +25,15 @@ fn rust_splice_matches_ortho4xp() {
     assert!(out == reference, "spliced output differs from Ortho4XP reference");
     assert_eq!(rasters.layer_names().len(), 11);
 }
+
+#[test]
+fn strip_recovers_stripped_from_reference() {
+    let Ok(dir) = std::env::var("XOF_PILOT_DIR") else {
+        eprintln!("skipped: XOF_PILOT_DIR not set");
+        return;
+    };
+    let dir = PathBuf::from(dir);
+    let stripped = std::fs::read(dir.join("a-stripped/+40-074.dsf")).unwrap();
+    let reference = std::fs::read(dir.join("b-reference/+40-074.dsf")).unwrap();
+    assert!(dsf::strip_rasters(&reference).unwrap() == stripped);
+}

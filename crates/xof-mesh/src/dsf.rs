@@ -222,6 +222,34 @@ pub fn splice(stripped: &[u8], rasters: &Rasters) -> Result<Vec<u8>, DsfError> {
     Ok(out)
 }
 
+/// Remove all raster data (empty `DEMN`, no `DEMS`) and recompute the MD5:
+/// the inverse of [`splice`]. Used by the publisher so Laminar data can never
+/// be uploaded even if a mesh was built with Global Scenery enabled.
+pub fn strip_rasters(dsf: &[u8]) -> Result<Vec<u8>, DsfError> {
+    let (header, body) = split(dsf)?;
+    let mut out = Vec::with_capacity(dsf.len());
+    out.extend_from_slice(header);
+    for a in atoms(body) {
+        let (tag, payload) = a?;
+        if tag == DEMS {
+            continue;
+        }
+        if tag == DEFN {
+            let mut defn = Vec::with_capacity(payload.len());
+            for s in atoms(payload) {
+                let (t, p) = s?;
+                push_atom(&mut defn, t, if t == DEMN { &[] } else { p });
+            }
+            push_atom(&mut out, tag, &defn);
+        } else {
+            push_atom(&mut out, tag, payload);
+        }
+    }
+    let sum = Md5::digest(&out);
+    out.extend_from_slice(&sum);
+    Ok(out)
+}
+
 /// Size of `splice(stripped, rasters)` for a conforming stripped DSF (empty
 /// `DEMN`, no `DEMS`), without doing the splice.
 pub fn spliced_len(stripped_len: u64, rasters_extra: u64) -> u64 {
@@ -317,6 +345,8 @@ pub(crate) mod tests {
         // Splicing an already spliced file replaces, never duplicates.
         let twice = splice(&out, &r).unwrap();
         assert_eq!(twice.len(), out.len());
+        // Strip is the exact inverse.
+        assert_eq!(strip_rasters(&out).unwrap(), s);
     }
 
     #[test]
