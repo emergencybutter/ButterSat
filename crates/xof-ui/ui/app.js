@@ -25,6 +25,38 @@ function show(view) {
 }
 window.addEventListener("hashchange", () => show(location.hash.slice(1) || "overview"));
 
+// ---------------------------------------------------------------- simple / advanced
+// Simple mode shows the overview only in a small window; "Advanced" reveals
+// every page and widens the window. The choice is remembered per viewer.
+const SIZES = { simple: [640, 720], advanced: [1240, 820] };
+function store(k, v) {
+  try {
+    if (v === undefined) return localStorage.getItem(k);
+    localStorage.setItem(k, v);
+  } catch (_) {
+    return null;
+  }
+}
+async function setAdvanced(on, resize) {
+  document.body.classList.toggle("simple", !on);
+  $("btn-advanced").textContent = on ? "Simple" : "Advanced";
+  $("btn-advanced").title = on ? "Back to the overview only" : $("btn-advanced").title;
+  store("buttersat.advanced", on ? "1" : "0");
+  if (!on && location.hash && location.hash !== "#overview") location.hash = "#overview";
+  if (resize) {
+    try {
+      const w = T.window.getCurrentWindow();
+      const [want_w, want_h] = SIZES[on ? "advanced" : "simple"];
+      const f = await w.scaleFactor();
+      const cur = (await w.innerSize()).toLogical(f);
+      // Grow for advanced, shrink back for simple; never fight a user-made larger window.
+      if (on ? cur.width < want_w : cur.width > want_w) await w.setSize(new (T.window.LogicalSize || T.dpi.LogicalSize)(want_w, want_h));
+    } catch (_) {}
+  }
+}
+$("btn-advanced").addEventListener("click", () => setAdvanced(document.body.classList.contains("simple"), true));
+setAdvanced(store("buttersat.advanced") === "1", false);
+
 // ---------------------------------------------------------------- overview
 function pill(id, cls, text) {
   const p = $(id);

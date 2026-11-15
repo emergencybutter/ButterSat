@@ -73,6 +73,11 @@ body {
 .side a:hover { background: var(--line); }
 .side a.active { background: var(--accent); color: var(--accent-ink); }
 main { grid-area: main; overflow: auto; padding: 16px; }
+/* Simple mode (default): the overview only, no side menu. */
+body.simple { grid-template-columns: 1fr; grid-template-areas: "top" "main"; }
+body.simple .side { display: none; }
+.pills { flex-wrap: wrap; }
+.topbar { min-width: 0; }
 .view { display: none; }
 .view.active { display: block; }
 #map.view.active { display: block; position: relative; height: calc(100vh - 52px - 32px); }
