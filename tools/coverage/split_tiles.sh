@@ -37,25 +37,39 @@ else
   cp "${filtered[0]}" "$merged"
 fi
 
-# osmium extract handles many bboxes per pass; batch by latitude rows to
-# bound memory.
-for lat in $(seq "$lat0" "$lat1"); do
+# osmium extract handles several bboxes per pass, but the 'smart' strategy
+# keeps large id sets per extract: more than ~5 per pass ran out of memory
+# (30 GB) on the US Northeast. Tiles already cut are skipped (resumable).
+BATCH=5
+pending=()
+flush() {
+  [ ${#pending[@]} -gt 0 ] || return 0
   cfg=$(mktemp --suffix .json)
   {
     echo '{"directory": "'"$osm/tiles"'", "extracts": ['
-    first=1
-    for lon in $(seq "$lon0" "$lon1"); do
-      name=$(printf '%+03d%+04d' "$lat" "$lon")
+    local first=1
+    for t in "${pending[@]}"; do
+      read -r name lat lon <<< "$t"
       [ $first -eq 1 ] || echo ','
       first=0
       printf '{"output": "%s.osm.pbf", "bbox": [%d, %d, %d, %d]}' "$name" "$lon" "$lat" $((lon + 1)) $((lat + 1))
     done
     echo ']}'
   } > "$cfg"
-  echo "extract row $lat"
-  osmium extract -c "$cfg" -s smart "$merged" --overwrite -q
+  echo "extract ${pending[*]%% *}"
+  osmium extract -c "$cfg" -s smart "$merged" --overwrite
   rm -f "$cfg"
+  pending=()
+}
+for lat in $(seq "$lat0" "$lat1"); do
+  for lon in $(seq "$lon0" "$lon1"); do
+    name=$(printf '%+03d%+04d' "$lat" "$lon")
+    [ -s "$osm/tiles/$name.osm.pbf" ] && continue
+    pending+=("$name $lat $lon")
+    [ ${#pending[@]} -ge $BATCH ] && flush
+  done
 done
+flush
 
 # Drop tiles with no ways at all (open ocean, outside the extracts).
 dropped=0

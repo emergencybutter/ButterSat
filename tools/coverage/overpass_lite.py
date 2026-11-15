@@ -25,7 +25,9 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-CLAUSE = re.compile(r'(node|way|rel)\["([^"]+)"(?:="([^"]*)")?\]\(([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)\)')
+# Ortho4XP writes the bbox as str(tuple): "(40, -74, 41, -73)", with spaces.
+N = r"\s*([-\d.]+)\s*"
+CLAUSE = re.compile(r'(node|way|rel)\["([^"]+)"(?:="([^"]*)")?\]\(' + N + "," + N + "," + N + "," + N + r"\)")
 EMPTY = b'<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6" generator="overpass-lite">\n</osm>\n'
 TYPE = {"node": "n", "way": "w", "rel": "r"}
 
