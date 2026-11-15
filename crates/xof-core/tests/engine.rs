@@ -178,7 +178,7 @@ async fn read_ahead_follows_the_mip_being_read() {
     let dir = tempfile::tempdir().unwrap();
     let store = TileStore::open(&dir.path().join("tiles.redb")).unwrap();
     let e = TextureEngine::new(
-        EngineConfig { deadline_ms: 5000, ..Default::default() },
+        EngineConfig { deadline_ms: 5000, read_ahead: true, ..Default::default() },
         Arc::new(Mock { base, hits: hits.clone() }),
         store,
     )

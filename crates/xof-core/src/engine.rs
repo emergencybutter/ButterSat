@@ -32,16 +32,16 @@ pub struct EngineConfig {
     pub decoded_ram_mb: usize,
     /// How many zoom levels up to search for a fallback ancestor.
     pub max_fallback_levels: u8,
-    /// On open by X-Plane, build every segment of the texture in parallel
-    /// instead of band by band as reads arrive (X-Plane reads a texture
-    /// front to back, so on-demand building costs ~30 sequential fetch round
-    /// trips per texture).
+    /// Build the rest of a mip (and the smaller ones) when X-Plane reads
+    /// into it. Off by default: in xof-bench cold starts it built 44% more
+    /// bands than X-Plane read and slowed the load (110 s vs 90 s); X-Plane
+    /// already reads with enough parallelism.
     pub read_ahead: bool,
 }
 
 impl Default for EngineConfig {
     fn default() -> Self {
-        Self { deadline_ms: 1200, segment_ram_mb: 1024, decoded_ram_mb: 256, max_fallback_levels: 8, read_ahead: true }
+        Self { deadline_ms: 1200, segment_ram_mb: 1024, decoded_ram_mb: 256, max_fallback_levels: 8, read_ahead: false }
     }
 }
 
