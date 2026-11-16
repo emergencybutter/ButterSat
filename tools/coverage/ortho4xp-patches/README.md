@@ -15,3 +15,11 @@ Base: Ortho4XP at commit 26ec00a, as used for the NYC pilot.
   integer"). Voids are filled from the nearest valid elevation.
 - `tools/coverage/o4_build.py` is copied into the Ortho4XP folder: Ortho4XP's
   CLI with an optional per-tile DEM.
+- `dsf-quadtree-overflow.patch`: `QuadTree.insert` (DSF point pools) looped
+  forever when more than `bucket_size` mesh points share identical
+  coordinates (seen on +30-085, Florida panhandle coast, after the XP12 water
+  re-cut): splitting can't separate them and the key stops growing past the
+  last quadkey digit. The deepest bucket now overflows instead.
+- `build_tiles.py` retries Triangle4XP failures ("really couldn't make it",
+  dense marsh such as +29-092) with `water_simplification`/`min_area` and
+  then `curvature_tol=3`, via `o4_build.py key=value` overrides.

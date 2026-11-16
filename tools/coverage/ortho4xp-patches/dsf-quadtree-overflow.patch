@@ -1,0 +1,17 @@
+--- a/src/O4_DSF_Utils.py	2026-11-16 01:26:26.559804900 -0500
++++ b/src/O4_DSF_Utils.py	2026-11-16 01:26:26.632881800 -0500
+@@ -75,7 +75,13 @@
+             if key in self:
+                 break
+             level += 1
+-        if self[key]["size"] < self.bucket_size:
++            if level > len(bx) + 1:
++                raise RuntimeError("QuadTree: no bucket for point")
++        # ButterSat patch: more than bucket_size points at identical
++        # coordinates can never be separated by splitting; past the last
++        # quadkey digit the old code looped forever. Let the deepest bucket
++        # overflow instead.
++        if self[key]["size"] < self.bucket_size or len(key[0]) >= len(bx):
+             self[key]["idx_nodes"].add(self.last_node)
+             self[key]["size"] += 1
+             self.nodes[self.last_node] = (bx, by)
