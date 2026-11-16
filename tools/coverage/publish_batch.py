@@ -80,6 +80,7 @@ def main():
     ap.add_argument("--go", action="store_true")
     ap.add_argument("--box", nargs=4, type=int, metavar=("LAT0", "LAT1", "LON0", "LON1"),
                     help="only publish tiles in this inclusive range (e.g. tiles whose OSM data is complete)")
+    ap.add_argument("--only", help="JSON from classify_tiles.py: publish only its 'complete' tiles")
     a = ap.parse_args()
 
     state = json.load(open(os.path.join(ROOT, "state.json")))
@@ -91,7 +92,12 @@ def main():
         lat, lon = int(t[:3]), int(t[3:])
         return a.box[0] <= lat <= a.box[1] and a.box[2] <= lon <= a.box[3]
 
-    new = sorted(t for t, v in state.items() if v.get("status") == "done" and t not in published and in_box(t))
+    allowed = set(json.load(open(a.only))["complete"]) if a.only else None
+    new = sorted(
+        t
+        for t, v in state.items()
+        if v.get("status") == "done" and t not in published and in_box(t) and (allowed is None or t in allowed)
+    )
     dirs = [os.path.join(O4_TILES, f"zOrtho4XP_{t}") for t in new]
     missing = [d for d in dirs if not os.path.isdir(d)]
     if missing:
