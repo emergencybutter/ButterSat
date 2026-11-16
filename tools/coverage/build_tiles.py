@@ -49,6 +49,11 @@ class State:
 
     def set(self, tile, **kw):
         with self.lock:
+            # Re-read before writing: the file is also edited by hand and by
+            # other tools while a build runs; writing our stale in-memory copy
+            # silently reverted those edits.
+            if os.path.exists(self.path):
+                self.data = json.load(open(self.path))
             self.data[tile] = {**kw, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
             tmp = self.path + ".tmp"
             with open(tmp, "w") as f:
