@@ -1,0 +1,29 @@
+--- a/src/O4_Vector_Utils.py	2026-11-16 14:47:28.767167300 -0500
++++ b/src/O4_Vector_Utils.py	2026-11-16 14:47:28.895442800 -0500
+@@ -784,8 +784,9 @@
+     elif input_geometry.geom_type == "Polygon":
+         return geometry.MultiPolygon([input_geometry])
+     elif "Collection" in input_geometry.geom_type:
++        # ButterSat patch: Shapely 2 needs a sequence, not a generator.
+         return geometry.MultiPolygon(
+-            (pol for pol in input_geometry.geoms if pol.geom_type == "Polygon")
++            [pol for pol in input_geometry.geoms if pol.geom_type == "Polygon"]
+         )
+     else:
+         return geometry.MultiPolygon()
+@@ -800,12 +801,13 @@
+     elif input_geometry.geom_type in ["LineString", "LinearRing"]:
+         return geometry.MultiLineString([input_geometry])
+     elif "Collection" in input_geometry.geom_type:
++        # ButterSat patch: Shapely 2 needs a sequence, not a generator.
+         return geometry.MultiLineString(
+-            (
++            [
+                 line
+                 for line in input_geometry.geoms
+                 if line.geom_type in ["LineString", "LinearRing"]
+-            )
++            ]
+         )
+     else:
+         return geometry.MultiLineString()

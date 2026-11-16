@@ -30,3 +30,8 @@ Base: Ortho4XP at commit 26ec00a, as used for the NYC pilot.
   stack (exit 0xC00000FD), which Ortho4XP reports as "Triangle4XP really
   couldn't make it" whatever the settings. Both tiles mesh with defaults
   after the change.
+- `shapely2-collections.patch`: `ensure_MultiLineString`/`ensure_MultiPolygon`
+  passed a generator to Shapely 2's constructors, which need a sequence;
+  crashed ("object of type 'generator' has no len()") whenever cutting a
+  coastline to the tile left a mixed GeometryCollection (Norwegian coast,
+  +64+009).
