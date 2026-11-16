@@ -23,3 +23,10 @@ Base: Ortho4XP at commit 26ec00a, as used for the NYC pilot.
 - `build_tiles.py` retries Triangle4XP failures ("really couldn't make it",
   dense marsh such as +29-092) with `water_simplification`/`min_area` and
   then `curvature_tol=3`, via `o4_build.py key=value` overrides.
+- `Utils\win\Triangle4XP.exe` stack reserve raised from 2 MB to 256 MB
+  (`editbin /STACK:268435456 Triangle4XP.exe`; original kept as
+  `Triangle4XP.orig.exe`). On very detailed coastlines (Louisiana marsh
+  +29-092, Puget Sound +47-123) Triangle's recursive refinement overflowed the
+  stack (exit 0xC00000FD), which Ortho4XP reports as "Triangle4XP really
+  couldn't make it" whatever the settings. Both tiles mesh with defaults
+  after the change.
