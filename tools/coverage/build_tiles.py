@@ -79,8 +79,26 @@ def clear_intermediates(o4, lat, lon):
             os.remove(f)
 
 
+# Triangle4XP can fail on dense, defective water geometry (Louisiana marsh)
+# even after Ortho4XP's own min_angle=0 retry. Coarser water first, then a
+# looser curvature tolerance.
+TRIANGLE_LADDER = [
+    ["water_simplification=1", "min_area=0.01"],
+    ["water_simplification=2", "min_area=0.05", "curvature_tol=3"],
+]
+
+
 def build(o4, lat, lon, timeout_s):
     status, reason, secs = build_once(o4, lat, lon, timeout_s)
+    for extra in TRIANGLE_LADDER:
+        if status != "failed" or "really couldn't make it" not in reason_text(lat, lon):
+            break
+        log(f"retry {tile_name(lat, lon)} with {' '.join(extra)} (Triangle4XP failed)")
+        clear_intermediates(o4, lat, lon)
+        status, reason, s2 = build_once(o4, lat, lon, timeout_s, extra=extra)
+        secs += s2
+        if status == "done":
+            reason = "retried with " + " ".join(extra)
     if status == "failed" and "NaN" in reason_text(lat, lon):
         log(f"retry {tile_name(lat, lon)} with {DEM_FALLBACK} (nodata elevation, border tile)")
         clear_intermediates(o4, lat, lon)
@@ -96,7 +114,7 @@ def reason_text(lat, lon):
     return open(p, encoding="utf-8", errors="replace").read() if os.path.exists(p) else ""
 
 
-def build_once(o4, lat, lon, timeout_s, dem=None):
+def build_once(o4, lat, lon, timeout_s, dem=None, extra=()):
     t = tile_name(lat, lon)
     logf = os.path.join(ROOT, "logs", "tiles", f"{t}.log")
     t0 = time.time()
@@ -104,7 +122,7 @@ def build_once(o4, lat, lon, timeout_s, dem=None):
         p = subprocess.Popen(
             # o4_build.py (copied into the Ortho4XP folder) is Ortho4XP.py's CLI
             # plus an optional per-tile DEM, which the CLI can't do.
-            [PYTHON, "o4_build.py", str(lat), str(lon)] + ([dem] if dem else []),
+            [PYTHON, "o4_build.py", str(lat), str(lon)] + ([dem] if dem else []) + list(extra),
             cwd=o4,
             stdout=out,
             stderr=subprocess.STDOUT,

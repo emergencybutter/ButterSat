@@ -5,7 +5,9 @@ Ortho4XP's command line builds from the global Ortho4XP.cfg only (it never
 reads the tile's own config), so per-tile settings such as the elevation
 source need this wrapper. Run with Ortho4XP's directory as the working dir:
 
-    python o4_build.py 44 -75 ['NED 1" (from USGS) - USA, Canada, Mexico']
+    python o4_build.py 44 -75 ['NED 1" (from USGS) - USA, Canada, Mexico'] [key=value ...]
+
+key=value overrides any tile setting (e.g. water_simplification=1).
 """
 
 import os
@@ -26,7 +28,9 @@ import O4_Config_Utils as CFG  # noqa: E402  (last: it patches other modules)
 
 def main():
     lat, lon = int(sys.argv[1]), int(sys.argv[2])
-    dem = sys.argv[3] if len(sys.argv) > 3 else None
+    extra = sys.argv[3:]
+    dem = next((x for x in extra if "=" not in x), None)
+    overrides = dict(x.split("=", 1) for x in extra if "=" in x)
     for d in (FNAMES.OSM_dir, FNAMES.Mask_dir, FNAMES.Elevation_dir, FNAMES.Tile_dir, FNAMES.Tmp_dir):
         os.makedirs(d, exist_ok=True)
     IMG.initialize_extents_dict()
@@ -37,6 +41,12 @@ def main():
     if dem:
         tile.custom_dem = dem
         print("custom_dem override:", dem, flush=True)
+    for k, v in overrides.items():
+        old = getattr(tile, k)
+        typ = type(old) if old is not None else str
+        val = (v.lower() in ("1", "true", "yes")) if typ is bool else typ(v)
+        setattr(tile, k, val)
+        print(f"override {k}: {old} -> {val}", flush=True)
     try:
         VMAP.build_poly_file(tile)
         MESH.build_mesh(tile)
