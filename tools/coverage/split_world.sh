@@ -33,7 +33,7 @@ fi
 # temporary folder and move into place only if the pass succeeds, so an
 # interrupted pass never leaves a partial file that a rerun would skip.
 extract() {
-  local src=$1 dir=$2; shift 2
+  local src=$1 dir=$2 t name lat lon dlat dlon first; shift 2
   [ $# -gt 0 ] || return 0
   local tmp="$dir/.pass.$$"; rm -rf "$tmp"; mkdir -p "$tmp"
   local cfg; cfg=$(mktemp --suffix .json)
