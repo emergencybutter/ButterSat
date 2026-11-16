@@ -719,6 +719,19 @@ $("btn-update").addEventListener("click", async (ev) => {
   }
 });
 
+// Background updates (src/main.rs auto_update): installs by itself once
+// X-Plane is closed; the app restarts with the new daemon.
+T.event.listen("update-available", ({ payload }) => {
+  pendingUpdate = { available: true, version: payload, body: "it installs automatically when X-Plane is not running" };
+  renderUpdateBanner();
+});
+T.event.listen("update-installing", ({ payload }) => {
+  pendingUpdate = { available: true, version: payload };
+  $("update-banner").classList.remove("hidden");
+  $("btn-update").disabled = true;
+  $("update-text").textContent = `Installing ButterSat ${payload}… ButterSat restarts by itself in a moment.`;
+});
+
 // ---------------------------------------------------------------- wiring
 async function refresh() {
   if (powerBusy) return;

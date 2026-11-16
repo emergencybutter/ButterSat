@@ -121,10 +121,131 @@ fn about() -> Value {
     })
 }
 
+// ------------------------------------------------------------------ updates
+//
+// The NSIS installer carries the app *and* its sidecars (xof-daemon, xof-cli),
+// so one update replaces all three. Sequence: we stop the daemon (plain
+// shutdown, the On/Off switch is untouched), the plugin starts the installer
+// with /UPDATE and exits; the installer's PREINSTALL hook stops any daemon
+// again, replaces the files and relaunches the app, which starts the new
+// daemon if ButterSat is on.
+
+const SIM_BUSY: &str = "Close X-Plane before installing an update so your flight is not interrupted.";
+
+/// The updater; `BUTTERSAT_UPDATE_ENDPOINT` overrides the feed (testing only:
+/// a plain-http feed also needs `dangerousInsecureTransportProtocol`).
+fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    let mut b = app.updater_builder();
+    if let Ok(url) = std::env::var("BUTTERSAT_UPDATE_ENDPOINT") {
+        let url = url.parse().map_err(|e| format!("BUTTERSAT_UPDATE_ENDPOINT: {e}"))?;
+        b = b.endpoints(vec![url]).map_err(|e| e.to_string())?;
+    }
+    b.build().map_err(|e| e.to_string())
+}
+
+/// Connect only if a daemon already runs (never start one just to ask).
+async fn ensure_if_running(app: &AppHandle, conn: &Conn) -> Result<Client, String> {
+    if conn.0.lock().await.is_some() || Client::connect().await.is_ok() {
+        return ensure(app, conn).await;
+    }
+    Err("daemon not running".into())
+}
+
+fn xplane_process_running() -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        std::process::Command::new("tasklist")
+            .args(["/FI", "IMAGENAME eq X-Plane.exe", "/NH"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map(|out| String::from_utf8_lossy(&out.stdout).contains("X-Plane.exe"))
+            .unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("pgrep")
+            .args(["-f", "X-Plane"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+}
+
+/// X-Plane is running or connected: never install then.
+async fn sim_busy(app: &AppHandle, conn: &Conn) -> bool {
+    if xplane_process_running() {
+        return true;
+    }
+    if let Ok(client) = ensure_if_running(app, conn).await {
+        if let Ok(st) = client.call::<_, Status>(method::STATUS, Value::Null).await {
+            return st.sim_connected;
+        }
+    }
+    false
+}
+
+/// Download and install `update` (on Windows the process exits and the
+/// installer relaunches the app). Refuses while X-Plane is busy; stops the
+/// daemon so its files can be replaced.
+async fn install(app: &AppHandle, conn: &Conn, update: tauri_plugin_updater::Update) -> Result<Value, String> {
+    if sim_busy(app, conn).await {
+        return Err(SIM_BUSY.into());
+    }
+    let _ = app.emit("update-installing", &update.version);
+    let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    if sim_busy(app, conn).await {
+        return Err(SIM_BUSY.into());
+    }
+    if let Ok(client) = ensure_if_running(app, conn).await {
+        let _ = client.call::<_, Value>(method::SHUTDOWN, Value::Null).await;
+        for _ in 0..50 {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            if Client::connect().await.is_err() {
+                break;
+            }
+        }
+    }
+    update.install(&bytes).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "installed": true, "version": update.version }))
+}
+
+fn auto_update_enabled() -> bool {
+    DaemonConfig::load(&Dirs::standard().config_file).map(|c| c.startup.auto_update).unwrap_or(true)
+}
+
+/// One background round: check, wait for X-Plane to close, install.
+async fn auto_update_once(app: &AppHandle) -> Result<(), String> {
+    let Some(update) = updater(app)?.check().await.map_err(|e| e.to_string())? else {
+        return Ok(());
+    };
+    let _ = app.emit("update-available", &update.version);
+    let conn = app.state::<Conn>();
+    while sim_busy(app, &conn).await {
+        tokio::time::sleep(Duration::from_secs(300)).await;
+    }
+    install(app, &conn, update).await.map(|_| ())
+}
+
+/// Background updates: shortly after start, then every 6 h.
+async fn auto_update(app: AppHandle) {
+    let delay = std::env::var("BUTTERSAT_UPDATE_DELAY_S").ok().and_then(|s| s.parse().ok()).unwrap_or(20);
+    tokio::time::sleep(Duration::from_secs(delay)).await;
+    loop {
+        if auto_update_enabled() {
+            if let Err(e) = auto_update_once(&app).await {
+                let _ = app.emit("update-error", e);
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(6 * 3600)).await;
+    }
+}
+
 /// Check the update feed (`https://satsrv.butr.cc/updates/latest.json`).
 #[tauri::command]
 async fn update_check(app: AppHandle) -> Result<Value, String> {
-    let updater = app.updater().map_err(|e| e.to_string())?;
+    let updater = updater(&app)?;
     match updater.check().await.map_err(|e| e.to_string())? {
         Some(u) => Ok(serde_json::json!({
             "available": true,
@@ -139,33 +260,14 @@ async fn update_check(app: AppHandle) -> Result<Value, String> {
     }
 }
 
-/// Download and install a pending update. Refuses while X-Plane is connected so
-/// an active flight is never interrupted.
+/// Download and install a pending update now (the banner's button). Refuses
+/// while X-Plane runs so an active flight is never interrupted.
 #[tauri::command]
 async fn update_install(app: AppHandle, conn: State<'_, Conn>) -> Result<Value, String> {
-    if let Ok(client) = ensure(&app, &conn).await {
-        if let Ok(st) = client.call::<_, Status>(method::STATUS, Value::Null).await {
-            if st.sim_connected {
-                return Err("Close X-Plane before installing an update so your flight is not interrupted.".into());
-            }
-        }
-    }
-    let updater = app.updater().map_err(|e| e.to_string())?;
-    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+    let Some(update) = updater(&app)?.check().await.map_err(|e| e.to_string())? else {
         return Ok(serde_json::json!({ "installed": false, "message": "Already up to date." }));
     };
-    let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
-    if let Ok(client) = ensure(&app, &conn).await {
-        if let Ok(st) = client.call::<_, Status>(method::STATUS, Value::Null).await {
-            if st.sim_connected {
-                return Err("Close X-Plane before installing an update so your flight is not interrupted.".into());
-            }
-        }
-        let _ = client.call::<_, Value>(method::SHUTDOWN, Value::Null).await;
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-    update.install(&bytes).map_err(|e| e.to_string())?;
-    Ok(serde_json::json!({ "installed": true, "version": update.version }))
+    install(&app, &conn, update).await
 }
 
 fn main() {
@@ -174,6 +276,10 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Conn::default())
+        .setup(|app| {
+            tauri::async_runtime::spawn(auto_update(app.handle().clone()));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             rpc,
             power_state,

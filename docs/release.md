@@ -64,7 +64,7 @@ This produces:
 
 ### What the installer does
 
-- **Per-user install by default** (`installMode: "currentUser"`): installs into `%LOCALAPPDATA%\Programs\ButterSat` without requiring administrator rights when WinFsp is already installed.
+- **Per-user install by default** (`installMode: "currentUser"`): installs into `%LOCALAPPDATA%\ButterSat` (next to the cache and logs; the uninstaller deletes only the files it installed, so caches survive unless "Delete app data" is ticked) without requiring administrator rights when WinFsp is already installed.
 - **WinFsp check**: checks `HKLM\SOFTWARE\WOW6432Node\WinFsp` (`InstallDir`). Only if WinFsp is missing does it elevate `msiexec.exe` to silently install the bundled unmodified `winfsp.msi` (satisfying the WinFsp FLOSS exception).
 - **Windows Defender exclusion prompt**: during interactive installs, asks the user whether to add `%LOCALAPPDATA%\ButterSat` to Microsoft Defender real-time scanning exclusions.
 - **Clean uninstall**: stops `xof-daemon` and unmounts the virtual filesystem, removes the `SCENERY_PACK Custom Scenery/z_buttersat/` line from `scenery_packs.ini` (leaving a timestamped `.bak`), removes the `HKCU\...\Run\ButterSat` login entry, and preserves user caches unless the user checks the "Delete app data" box in the uninstaller.
@@ -73,7 +73,13 @@ This produces:
 
 ## 4. Publishing an Update (`satsrv.butr.cc`)
 
-The Tauri updater polls `https://satsrv.butr.cc/updates/latest.json` at startup (and when clicking **Check for updates** in the About tab). When an update is available, the UI displays an **Install update** banner on the Overview tab and refuses to install while X-Plane is connected (`sim_connected == true`).
+The app checks `https://satsrv.butr.cc/updates/latest.json` 20 s after it starts and every 6 hours (also **Check for updates** in About). With **Install updates automatically** on (default, `startup.auto_update`), it installs by itself as soon as X-Plane is neither running nor connected (re-checked every 5 minutes); otherwise the Overview banner's **Install update** button does the same.
+
+One update replaces the app **and the daemon and CLI** (sidecars in the same NSIS bundle): the app stops the daemon (plain shutdown, the On/Off switch is untouched), the updater runs the installer with `/UPDATE` and exits, `NSIS_HOOK_PREINSTALL` stops any daemon again, the files are replaced, and the installer relaunches the app, which starts the new daemon if ButterSat is on. Verified end-to-end on 2026-11-16 (0.1.2 → 0.1.3 test builds): all three executables replaced, daemon log `0.1.2 … shutdown requested … 0.1.3 starting … mounted` within 8 s, no user action.
+
+Updates only run while the app is open: a daemon started at login without the app does not update until the app is opened.
+
+**Testing an update locally:** build two versions with a config overlay `{"plugins":{"updater":{"endpoints":["http://127.0.0.1:8732/latest.json"],"dangerousInsecureTransportProtocol":true}}}` (`--config overlay.json`), serve the newer one's `latest.json` + installer with `python -m http.server 8732`, install the older one, start it with `BUTTERSAT_UPDATE_DELAY_S=5`. Never publish overlay builds, and rebuild `target/release` without the overlay afterwards.
 
 ### Step 1: Generate `latest.json`
 

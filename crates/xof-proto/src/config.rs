@@ -214,11 +214,13 @@ pub struct StartupConfig {
     pub enabled: bool,
     /// Start the daemon when the user logs in.
     pub start_at_login: bool,
+    /// The app installs updates by itself (never while X-Plane runs).
+    pub auto_update: bool,
 }
 
 impl Default for StartupConfig {
     fn default() -> Self {
-        Self { enabled: true, start_at_login: false }
+        Self { enabled: true, start_at_login: false, auto_update: true }
     }
 }
 
