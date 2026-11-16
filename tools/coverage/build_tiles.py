@@ -160,17 +160,50 @@ def main():
     todo.sort(key=lambda p: (-p[0], -p[1]))
     log(f"box {a.box}: {len(todo)} tiles to build with {a.workers} workers")
 
+    # Ortho4XP reads the meshes of already-built neighbours to stitch tile
+    # edges, so two adjacent tiles must never build at the same time (a
+    # half-written neighbour mesh crashes the reader: "could not broadcast
+    # input array from shape (0,)"). Workers take the first pending tile with
+    # no neighbour in progress.
+    cond = threading.Condition()
+    pending = list(todo)
+    running = set()
+
+    def adjacent(p, q):
+        return abs(p[0] - q[0]) <= 1 and abs(p[1] - q[1]) <= 1
+
+    def next_tile():
+        with cond:
+            while True:
+                if not pending:
+                    return None
+                for i, p in enumerate(pending):
+                    if not any(adjacent(p, r) for r in running):
+                        running.add(p)
+                        return pending.pop(i)
+                cond.wait()
+
     def work(p):
         lat, lon = p
         t = tile_name(lat, lon)
         log(f"start {t}")
-        status, reason, secs = build(a.o4, lat, lon, a.timeout)
-        size = os.path.getsize(dsf_path(a.o4, lat, lon)) if status == "done" else 0
-        state.set(t, status=status, reason=reason, seconds=round(secs), dsf_bytes=size)
-        log(f"{status} {t} in {secs / 60:.1f} min {size >> 20} MB {reason}")
+        try:
+            status, reason, secs = build(a.o4, lat, lon, a.timeout)
+            size = os.path.getsize(dsf_path(a.o4, lat, lon)) if status == "done" else 0
+            state.set(t, status=status, reason=reason, seconds=round(secs), dsf_bytes=size)
+            log(f"{status} {t} in {secs / 60:.1f} min {size >> 20} MB {reason}")
+        finally:
+            with cond:
+                running.discard(p)
+                cond.notify_all()
+
+    def worker():
+        while (p := next_tile()) is not None:
+            work(p)
 
     with ThreadPoolExecutor(max_workers=a.workers) as ex:
-        list(ex.map(work, todo))
+        for f in [ex.submit(worker) for _ in range(a.workers)]:
+            f.result()
     counts = {}
     for v in state.data.values():
         counts[v["status"]] = counts.get(v["status"], 0) + 1
