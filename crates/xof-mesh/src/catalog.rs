@@ -281,21 +281,33 @@ impl CatalogClient {
     }
 
     /// Download an object from the first mirror that has it, verifying BLAKE3.
+    ///
+    /// Mirrors may be partial (e.g. the US on one host, the rest of the world
+    /// on another, all sharing one signed manifest): a 404 means "not here",
+    /// so it moves on quietly without demoting the mirror. Other errors
+    /// (unreachable, 5xx, bad hash) count as mirror failures.
     pub async fn fetch_object(&self, mirrors: &[String], obj: &Object) -> anyhow::Result<Vec<u8>> {
         let mut last_err = anyhow::anyhow!("no mirrors configured");
         for base in &self.ordered(mirrors) {
-            let res: anyhow::Result<Vec<u8>> = async {
-                let data = self.http.get(join_url(base, &obj.object)).send().await?.error_for_status()?.bytes().await?;
+            let res: anyhow::Result<Option<Vec<u8>>> = async {
+                let resp = self.http.get(join_url(base, &obj.object)).send().await?;
+                if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                    return Ok(None);
+                }
+                let data = resp.error_for_status()?.bytes().await?;
                 anyhow::ensure!(data.len() as u64 == obj.size, "size mismatch for {}", obj.object);
                 let h = blake3::hash(&data).to_hex();
                 anyhow::ensure!(h.as_str() == obj.blake3, "hash mismatch for {}", obj.object);
-                Ok(data.to_vec())
+                Ok(Some(data.to_vec()))
             }
             .await;
             match res {
-                Ok(d) => {
-                    self.mark(base, true);
+                Ok(Some(d)) => {
                     return Ok(d);
+                }
+                Ok(None) => {
+                    tracing::debug!("object {} not on {base}", obj.object);
+                    last_err = anyhow::anyhow!("{} not found on any mirror", obj.object);
                 }
                 Err(e) => {
                     tracing::warn!("object {} from {base}: {e}", obj.object);
