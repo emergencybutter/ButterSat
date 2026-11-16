@@ -105,7 +105,8 @@ for sb in $(printf '%s
   [ ${#pending[@]} -eq 0 ] || { echo "blocks ${pending[*]%% *}"; extract "$osm/superblocks/$sb.osm.pbf" "$osm/blocks" "${pending[@]}"; }
 done
 
-# 2. Tiles from each block (small input: 25 tiles per pass).
+# 2. Tiles from each block: 5 per pass (memory grows ~1.2 GB per output
+#    even from a small block; 25 per pass ran out of 30 GB).
 for b in "${blocks[@]}"; do
   read -r name blat blon <<< "$b"
   src="$osm/blocks/$name.osm.pbf"
@@ -118,7 +119,7 @@ for b in "${blocks[@]}"; do
       t=$(printf '%+03d%+04d' "$lat" "$lon")
       [ -s "$osm/tiles/$t.osm.pbf" ] && continue
       pending+=("$t $lat $lon 1 1")
-      if [ ${#pending[@]} -ge 25 ]; then extract "$src" "$osm/tiles" "${pending[@]}"; pending=(); fi
+      if [ ${#pending[@]} -ge 5 ]; then extract "$src" "$osm/tiles" "${pending[@]}"; pending=(); fi
     done
   done
   [ ${#pending[@]} -eq 0 ] || extract "$src" "$osm/tiles" "${pending[@]}"
