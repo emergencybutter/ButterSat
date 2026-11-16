@@ -139,7 +139,14 @@ def main():
     os.makedirs(os.path.join(ROOT, "logs", "tiles"), exist_ok=True)
     state = State(os.path.join(ROOT, "state.json"))
 
-    have_osm = {os.path.basename(f)[:7] for f in glob.glob(os.path.join(a.osm_tiles, "*.osm.pbf"))}
+    # A header-only file (~92 bytes) is a cut with no data (open water); the
+    # splitter deletes those at the very end, so a build started while it
+    # runs must not take them for land.
+    have_osm = {
+        os.path.basename(f)[:7]
+        for f in glob.glob(os.path.join(a.osm_tiles, "*.osm.pbf"))
+        if os.path.getsize(f) > 512
+    }
     todo = []
     for lat in range(a.box[0], a.box[1] + 1):
         for lon in range(a.box[2], a.box[3] + 1):

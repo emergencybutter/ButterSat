@@ -71,8 +71,9 @@ def regions_of_tile(polys, lat, lon, n=9):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cut", action="append", required=True,
-                    help="REGIONS:LAT0,LAT1,LON0,LON1 - tiles in this box were cut from these extracts")
+    ap.add_argument("--cut", action="append", default=[],
+                    help="REGIONS:LAT0,LAT1,LON0,LON1 - tiles in this box were cut from these extracts "
+                    "(fallback for tiles missing from osm/tiles/sources.json)")
     a = ap.parse_args()
     polys = {os.path.basename(p)[:-5]: read_poly(p) for p in glob.glob(os.path.join(ROOT, "osm", "poly", "*.poly"))}
     cuts = []
@@ -80,15 +81,17 @@ def main():
         regs, box = c.split(":")
         lat0, lat1, lon0, lon1 = map(int, box.split(","))
         cuts.append((set(regs.split(",")), lat0, lat1, lon0, lon1))
+    sources_path = os.path.join(ROOT, "osm", "tiles", "sources.json")
+    sources = json.load(open(sources_path)) if os.path.exists(sources_path) else {}
     state = json.load(open(os.path.join(ROOT, "state.json")))
     complete, incomplete = [], {}
     for t, v in sorted(state.items()):
         if v.get("status") != "done":
             continue
         lat, lon = int(t[:3]), int(t[3:])
-        src = None
+        src = set(sources[t]) if t in sources else None
         for regs, la0, la1, lo0, lo1 in cuts:  # first matching box wins
-            if la0 <= lat <= la1 and lo0 <= lon <= lo1:
+            if src is None and la0 <= lat <= la1 and lo0 <= lon <= lo1:
                 src = regs
                 break
         if src is None:
