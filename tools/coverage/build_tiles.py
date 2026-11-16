@@ -69,17 +69,10 @@ def log(msg):
 DEM_FALLBACK = 'NED 1" (from USGS) - USA, Canada, Mexico'
 
 
-def set_tile_dem(o4, lat, lon, dem):
-    """Write custom_dem into the tile's own Ortho4XP config (read by the CLI)."""
+def clear_intermediates(o4, lat, lon):
+    """The elevation is baked into Ortho4XP's intermediate files: drop them."""
     t = tile_name(lat, lon)
     d = os.path.join(o4, "Tiles", f"zOrtho4XP_{t}")
-    os.makedirs(d, exist_ok=True)
-    cfg = os.path.join(d, f"Ortho4XP_{t}.cfg")
-    lines = open(cfg, encoding="utf-8").read().splitlines() if os.path.exists(cfg) else []
-    lines = [l for l in lines if not l.startswith("custom_dem=")] + [f"custom_dem={dem}"]
-    with open(cfg, "w", encoding="utf-8") as f:
-        f.writelines(line + "\n" for line in lines)
-    # The elevation is baked into the intermediate files: rebuild them.
     for ext in ("alt", "mesh", "node", "poly", "apt"):
         f = os.path.join(d, f"Data{t}.{ext}")
         if os.path.exists(f):
@@ -90,8 +83,8 @@ def build(o4, lat, lon, timeout_s):
     status, reason, secs = build_once(o4, lat, lon, timeout_s)
     if status == "failed" and "NaN" in reason_text(lat, lon):
         log(f"retry {tile_name(lat, lon)} with {DEM_FALLBACK} (nodata elevation, border tile)")
-        set_tile_dem(o4, lat, lon, DEM_FALLBACK)
-        status, reason, secs2 = build_once(o4, lat, lon, timeout_s)
+        clear_intermediates(o4, lat, lon)
+        status, reason, secs2 = build_once(o4, lat, lon, timeout_s, DEM_FALLBACK)
         secs += secs2
         if status == "done":
             reason = "DEM fallback: NED 1\""
@@ -103,13 +96,15 @@ def reason_text(lat, lon):
     return open(p, encoding="utf-8", errors="replace").read() if os.path.exists(p) else ""
 
 
-def build_once(o4, lat, lon, timeout_s):
+def build_once(o4, lat, lon, timeout_s, dem=None):
     t = tile_name(lat, lon)
     logf = os.path.join(ROOT, "logs", "tiles", f"{t}.log")
     t0 = time.time()
     with open(logf, "w", encoding="utf-8", errors="replace") as out:
         p = subprocess.Popen(
-            [PYTHON, "Ortho4XP.py", str(lat), str(lon)],
+            # o4_build.py (copied into the Ortho4XP folder) is Ortho4XP.py's CLI
+            # plus an optional per-tile DEM, which the CLI can't do.
+            [PYTHON, "o4_build.py", str(lat), str(lon)] + ([dem] if dem else []),
             cwd=o4,
             stdout=out,
             stderr=subprocess.STDOUT,
