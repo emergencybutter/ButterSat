@@ -15,11 +15,14 @@ Logs:  <root>/logs/tiles/<tile>.log, <root>/logs/progress.log
 import argparse
 import glob
 import json
+import shutil
 import os
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 ROOT = r"D:\ButterSat-build"
@@ -74,6 +77,53 @@ def log(msg):
 DEM_FALLBACK = 'NED 1" (from USGS) - USA, Canada, Mexico'
 
 
+# Elevation by region: NED 1" (Ortho4XP.cfg default) in North America;
+# elsewhere Copernicus GLO-30 (30 m, free, attribution in the app's About),
+# fetched per tile from the public AWS bucket and deleted after the build;
+# viewfinderpanoramas (3") where Copernicus has no tile.
+COP30_URL = "https://copernicus-dem-30m.s3.amazonaws.com/{n}/{n}.tif"
+VIEW_DEM = "Viewfinderpanoramas (J. de Ferranti) - mostly worldwide"
+
+
+def in_ned(lat, lon):
+    return 14 <= lat <= 71 and -170 <= lon <= -52
+
+
+def hem(lat, lon):
+    return f"{'N' if lat >= 0 else 'S'}{abs(lat):02d}{'E' if lon >= 0 else 'W'}{abs(lon):03d}"
+
+
+def cop30_path(o4, lat, lon):
+    return os.path.join(o4, "Elevation_data", "COP30", hem(lat, lon) + ".tif")
+
+
+def dem_for(o4, lat, lon):
+    """None = Ortho4XP.cfg's NED 1"; else a DEM file path or source name."""
+    if in_ned(lat, lon):
+        return None
+    path = cop30_path(o4, lat, lon)
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return os.path.abspath(path)
+    ns = f"{'N' if lat >= 0 else 'S'}{abs(lat):02d}_00"
+    ew = f"{'E' if lon >= 0 else 'W'}{abs(lon):03d}_00"
+    url = COP30_URL.format(n=f"Copernicus_DSM_COG_10_{ns}_{ew}_DEM")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".part"
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(url, timeout=120) as r, open(tmp, "wb") as f:
+                shutil.copyfileobj(r, f)
+            os.replace(tmp, path)
+            return os.path.abspath(path)
+        except urllib.error.HTTPError as e:
+            if e.code in (403, 404):  # no Copernicus tile here (open sea, gaps)
+                return VIEW_DEM
+            time.sleep(10 * (attempt + 1))
+        except OSError:
+            time.sleep(10 * (attempt + 1))
+    return VIEW_DEM
+
+
 def clear_intermediates(o4, lat, lon):
     """The elevation is baked into Ortho4XP's intermediate files: drop them."""
     t = tile_name(lat, lon)
@@ -95,7 +145,19 @@ TRIANGLE_LADDER = [
 
 
 def build(o4, lat, lon, timeout_s):
-    status, reason, secs = build_once(o4, lat, lon, timeout_s)
+    dem = dem_for(o4, lat, lon)
+    try:
+        return build_with(o4, lat, lon, timeout_s, dem)
+    finally:
+        if dem and dem.endswith(".tif"):
+            try:
+                os.remove(dem)
+            except OSError:
+                pass
+
+
+def build_with(o4, lat, lon, timeout_s, dem):
+    status, reason, secs = build_once(o4, lat, lon, timeout_s, dem)
     for extra in TRIANGLE_LADDER:
         text = reason_text(lat, lon) if status == "failed" else ""
         # Triangle4XP crash, or a degenerate XP12 water re-cut that piles
@@ -104,11 +166,11 @@ def build(o4, lat, lon, timeout_s):
             break
         log(f"retry {tile_name(lat, lon)} with {' '.join(extra)} (mesh/water geometry failure)")
         clear_intermediates(o4, lat, lon)
-        status, reason, s2 = build_once(o4, lat, lon, timeout_s, extra=extra)
+        status, reason, s2 = build_once(o4, lat, lon, timeout_s, dem, extra=extra)
         secs += s2
         if status == "done":
             reason = "retried with " + " ".join(extra)
-    if status == "failed" and "NaN" in reason_text(lat, lon):
+    if status == "failed" and dem is None and "NaN" in reason_text(lat, lon):
         log(f"retry {tile_name(lat, lon)} with {DEM_FALLBACK} (nodata elevation, border tile)")
         clear_intermediates(o4, lat, lon)
         status, reason, secs2 = build_once(o4, lat, lon, timeout_s, DEM_FALLBACK)
