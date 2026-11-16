@@ -12,3 +12,12 @@
 - `2026-11-16T00:03:00Z` — +44-075 rebuilt with NED 1" (US+Canada+Mexico) via tools/coverage/o4_build.py (Ortho4XP's CLI ignores per-tile configs).
 - `2026-11-16T00:15:00Z` — Published catalog 2026.11.15.2351: 69 tiles (68 Northeast tiles fully inside NE states + pilot +39-075), 1.7 GB uploaded, verified through Cloudflare; selfhost 99 GB free. Region-edge tiles (lat 38-39 MD/DE/WV, lon -81 OH) held back until all extracts are merged.
 - `2026-11-16T00:14:00Z` — Midwest: extract downloaded and split (300 tiles with data); build started (6 workers). South/West downloads continue.
+- `2026-11-16T00:26:00Z` — Neighbour race: Ortho4XP reads already-built neighbours' meshes to stitch edges; +48-099 crashed on a half-written +48-100 mesh. Builder now never builds two adjacent tiles at once.
+- `2026-11-16T01:10:00Z` — +45-085 (Great Lakes): NED marks voids as NaN, which Ortho4XP's nodata fill never matched. Patched (nearest-valid fill, scipy); all later tiles use NED 1" (US+Canada+Mexico). Patches in tools/coverage/ortho4xp-patches/.
+- `2026-11-16T02:10:00Z` — Midwest built (380 done incl. NE). classify_tiles.py: a tile publishes only when every Geofabrik region it touches was in its cut.
+- `2026-11-16T02:24:00Z` — Published catalog 2026.11.16.0211: 317 tiles (NE + Midwest, complete tiles only), 3.3 GB uploaded, verified; selfhost 96 GB free.
+- `2026-11-16T03:50:00Z` — South extract cut with NE+MW+South merged; 44 region-edge tiles reset and recut. Builder ignores header-only (open-water) cuts so it can run while a cut is in progress.
+- `2026-11-16T05:30:00Z` — us-west "-latest" download was corrupt (resumed across Geofabrik's daily update). tools/coverage/download_extract.sh fetches dated snapshots and checks MD5. Merging extracts from different days duplicated border objects; split_tiles.sh now dedupes with `osmium time-filter`.
+- `2026-11-16T06:26:00Z` — +30-085 (FL panhandle) hung 2 h: degenerate XP12 water re-cut near St. Marks piles ~40k points within 1e-7°, and Ortho4XP's DSF quadtree looped forever. Quadtree patched (no hang); tile builds with water_simplification=1 min_area=0.01. Builder retries this error class automatically.
+- `2026-11-16T07:39:00Z` — East of 102°W built: 564 tiles done. Known gap: +29-092 (Louisiana marsh SW of New Orleans) — Triangle4XP fails on every setting tried (min_angle 0, water simplification 1/2, curvature_tol 3, limit_tris 1/2). X-Plane shows default scenery there.
+- `2026-11-16T07:40:00Z` — West cut (all four extracts merged) in progress.

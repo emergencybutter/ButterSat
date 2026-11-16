@@ -79,9 +79,10 @@ def clear_intermediates(o4, lat, lon):
             os.remove(f)
 
 
-# Triangle4XP can fail on dense, defective water geometry (Louisiana marsh)
-# even after Ortho4XP's own min_angle=0 retry. Coarser water first, then a
-# looser curvature tolerance.
+# Dense, defective water geometry breaks Ortho4XP in two ways: Triangle4XP
+# fails even after its own min_angle=0 retry (Louisiana marsh), or the XP12
+# water re-cut degenerates (+30-085). Coarser water first, then a looser
+# curvature tolerance.
 TRIANGLE_LADDER = [
     ["water_simplification=1", "min_area=0.01"],
     ["water_simplification=2", "min_area=0.05", "curvature_tol=3"],
@@ -91,9 +92,12 @@ TRIANGLE_LADDER = [
 def build(o4, lat, lon, timeout_s):
     status, reason, secs = build_once(o4, lat, lon, timeout_s)
     for extra in TRIANGLE_LADDER:
-        if status != "failed" or "really couldn't make it" not in reason_text(lat, lon):
+        text = reason_text(lat, lon) if status == "failed" else ""
+        # Triangle4XP crash, or a degenerate XP12 water re-cut that piles
+        # thousands of points onto one spot (DSF quadtree runs out of bits).
+        if not ("really couldn't make it" in text or "invalid literal for int() with base 2" in text):
             break
-        log(f"retry {tile_name(lat, lon)} with {' '.join(extra)} (Triangle4XP failed)")
+        log(f"retry {tile_name(lat, lon)} with {' '.join(extra)} (mesh/water geometry failure)")
         clear_intermediates(o4, lat, lon)
         status, reason, s2 = build_once(o4, lat, lon, timeout_s, extra=extra)
         secs += s2
