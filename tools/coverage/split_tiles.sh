@@ -32,12 +32,12 @@ done
 merged="$osm/filtered/merged.osm.pbf"
 if [ ${#filtered[@]} -gt 1 ]; then
   echo "merge ${#filtered[@]} extracts"
-  osmium merge "${filtered[@]}" -o "$merged.multi" --overwrite
+  osmium merge "${filtered[@]}" -o "${merged%.osm.pbf}.multi.osm.pbf" --overwrite
   # Extracts from different days can carry two versions of an object that
   # crosses a region border; extract rejects duplicate ids. Read the merge as
   # a history and keep the newest version of each object.
-  osmium time-filter "$merged.multi" -o "$merged" --overwrite
-  rm -f "$merged.multi"
+  osmium time-filter "${merged%.osm.pbf}.multi.osm.pbf" -o "$merged" --overwrite
+  rm -f "${merged%.osm.pbf}.multi.osm.pbf"
 else
   cp "${filtered[0]}" "$merged"
 fi
