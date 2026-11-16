@@ -13,6 +13,10 @@ key=value overrides any tile setting (e.g. water_simplification=1).
 import os
 import sys
 
+# Output goes to a log file, which Windows Python writes as cp1252: an
+# airport name with e.g. U+02BC (Navajo) crashed the build mid-print.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 sys.path.append(os.path.join(".", "src"))
 
 import O4_File_Names as FNAMES  # noqa: E402
