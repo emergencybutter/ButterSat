@@ -53,11 +53,8 @@ pub fn spawn_daemon(path: &Path) -> anyhow::Result<()> {
     {
         use std::os::windows::io::AsRawHandle;
         use windows::Win32::Foundation::{SetHandleInformation, HANDLE, HANDLE_FLAGS, HANDLE_FLAG_INHERIT};
-        let handles = [
-            std::io::stdin().as_raw_handle(),
-            std::io::stdout().as_raw_handle(),
-            std::io::stderr().as_raw_handle(),
-        ];
+        let handles =
+            [std::io::stdin().as_raw_handle(), std::io::stdout().as_raw_handle(), std::io::stderr().as_raw_handle()];
         for h in handles {
             if !h.is_null() {
                 // SAFETY: our own standard handles; failure is harmless.
