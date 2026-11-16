@@ -11,12 +11,12 @@
   <header class="topbar">
     <div class="brand"><img src="icon.png" alt=""><span>ButterSat</span></div>
     <div class="pills">
-      <span class="pill" id="pill-daemon" title="Background daemon">daemon</span>
-      <span class="pill" id="pill-mount" title="Scenery mount">mount</span>
       <span class="pill" id="pill-sim" title="X-Plane 12 Web API">X-Plane</span>
     </div>
     <button id="btn-advanced" title="Show every page: map, flight preparation, packs, settings, logs">Advanced</button>
-    <button id="btn-mount" class="primary">Mount</button>
+    <button id="power" class="switch" role="switch" aria-checked="false" title="Turn ButterSat on or off">
+      <span class="track"><span class="knob"></span></span><span id="power-label">Off</span>
+    </button>
   </header>
 
   <nav class="side">
@@ -36,6 +36,11 @@
         <button type="button" id="btn-update" class="primary">Install update</button>
       </div>
       <div id="banner" class="banner hidden"></div>
+      <div id="off-card" class="card off hidden">
+        <h2>ButterSat is off</h2>
+        <p>X-Plane uses its own scenery. Turn ButterSat on to stream photo scenery and meshes; it adds its entry to scenery_packs.ini again.</p>
+        <button type="button" class="primary" id="btn-turn-on">Turn on</button>
+      </div>
       <div class="card activity">
         <h3>Activity <span class="muted">· last 30 min</span></h3>
         <div class="charts">
@@ -203,12 +208,9 @@
         <label>Catalog mirrors (one per line)<textarea name="mesh.mirrors" rows="2"></textarea></label>
         <label>Trusted catalog keys (one per line)<textarea name="mesh.public_keys" rows="2" class="mono"></textarea></label>
 
-        <h3>X-Plane and mount</h3>
+        <h3>X-Plane</h3>
         <label>X-Plane 12 folder<input name="xplane.path" placeholder="auto-detected"></label>
-        <label>Mount point<input name="mount.path" placeholder="&lt;X-Plane&gt;/Custom Scenery/z_buttersat"></label>
-        <label class="check"><input type="checkbox" name="mount.auto_mount"> Mount when the daemon starts</label>
-        <label class="check"><input type="checkbox" name="mount.manage_scenery_packs"> Keep the scenery_packs.ini entry up to date</label>
-        <label class="check"><input type="checkbox" name="startup.start_at_login"> Start the ButterSat service when I log in</label>
+        <label class="check"><input type="checkbox" name="startup.start_at_login"> Start ButterSat when I log in (only while it is on)</label>
 
         <div class="row end"><span id="settings-result" class="result"></span><button class="primary">Save</button></div>
       </form>

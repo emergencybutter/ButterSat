@@ -205,11 +205,21 @@ pub struct StorageConfig {
     pub cache_path: Option<PathBuf>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct StartupConfig {
+    /// ButterSat is switched on (the app's On/Off). When off, the daemon
+    /// exits at start (e.g. at login) and our scenery_packs.ini entry is
+    /// disabled.
+    pub enabled: bool,
     /// Start the daemon when the user logs in.
     pub start_at_login: bool,
+}
+
+impl Default for StartupConfig {
+    fn default() -> Self {
+        Self { enabled: true, start_at_login: false }
+    }
 }
 
 /// Standard per-user locations.

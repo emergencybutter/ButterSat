@@ -28,7 +28,15 @@ enum Cmd {
     Mount,
     /// Unmount the scenery.
     Unmount,
-    /// Stop the daemon.
+    /// Switch ButterSat on: start the daemon, mount, and add or re-enable our
+    /// scenery_packs.ini entry. Stays on across restarts.
+    On,
+    /// Switch ButterSat off: unmount, disable our scenery_packs.ini entry, stop
+    /// the daemon, and keep it from starting at login. Refused while X-Plane
+    /// is running.
+    Off,
+    /// Stop the daemon without switching ButterSat off (it starts again with
+    /// the app or at login).
     Shutdown,
     /// Clean up ButterSat before uninstalling: stop the daemon, unmount, remove
     /// our `scenery_packs.ini` entry and login registration, and optionally
@@ -291,6 +299,18 @@ async fn main() -> anyhow::Result<()> {
                 .init();
             return run_standalone(pack, mount, provider, deadline_ms, cache).await;
         }
+        Cmd::On => {
+            let exe = std::env::current_exe()?;
+            let c = xof_proto::power::turn_on(exe.parent().unwrap_or(std::path::Path::new("."))).await?;
+            let s: Status = c.call(method::STATUS, Value::Null).await?;
+            println!("ButterSat is on{}", if s.mounted { "" } else { " (mounting…)" });
+            return Ok(());
+        }
+        Cmd::Off => {
+            xof_proto::power::turn_off().await?;
+            println!("ButterSat is off: scenery unmounted and disabled in scenery_packs.ini");
+            return Ok(());
+        }
         Cmd::Shutdown => {
             if stop_daemon_and_wait().await? {
                 println!("daemon stopped");
@@ -336,7 +356,7 @@ async fn main() -> anyhow::Result<()> {
             c.call::<_, Value>(method::UNMOUNT, Value::Null).await?;
             println!("unmounted");
         }
-        Cmd::Shutdown | Cmd::Uninstall { .. } => unreachable!(),
+        Cmd::On | Cmd::Off | Cmd::Shutdown | Cmd::Uninstall { .. } => unreachable!(),
         Cmd::Config => {
             let v: xof_proto::config::DaemonConfig = c.call(method::GET_CONFIG, Value::Null).await?;
             print!("{}", toml::to_string_pretty(&v)?);

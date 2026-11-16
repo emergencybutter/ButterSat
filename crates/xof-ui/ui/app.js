@@ -211,12 +211,7 @@ function renderStatus(s) {
   status = s;
   renderStorage(s);
   renderUpdateBanner();
-  pill("pill-daemon", "ok", "daemon");
-  pill("pill-mount", s.mounted ? "ok" : "warn", s.mounted ? "mounted" : "not mounted");
   pill("pill-sim", s.sim_connected ? "ok" : "", s.sim_connected ? "X-Plane connected" : "X-Plane idle");
-  const btn = $("btn-mount");
-  btn.textContent = s.mounted ? "Unmount" : "Mount";
-  btn.classList.toggle("primary", !s.mounted);
 
   $("o-mounted").textContent = s.mounted ? "Mounted" : s.mount_error ? "Error: " + s.mount_error : "Not mounted";
   $("o-mountpoint").textContent = s.mount_point || "—";
@@ -276,18 +271,45 @@ function renderHealth(h) {
   banner.textContent = bad.map((c) => `${c.title}: ${c.message}${c.fix ? " — " + c.fix : ""}`).join("  ·  ");
 }
 
-$("btn-mount").addEventListener("click", async (ev) => {
-  const b = ev.currentTarget;
-  b.disabled = true;
-  try {
-    await rpc(status && status.mounted ? "unmount" : "mount");
-  } catch (e) {
-    alert(e);
-  } finally {
-    b.disabled = false;
-    refresh();
+// ---------------------------------------------------------------- on/off
+// One switch. On: start the daemon, mount, enable our scenery_packs.ini entry.
+// Off: unmount, disable the entry, stop the daemon (refused while X-Plane runs).
+let poweredOn = false;
+let powerBusy = false;
+
+function renderPower(on) {
+  poweredOn = on;
+  const sw = $("power");
+  sw.setAttribute("aria-checked", on ? "true" : "false");
+  $("power-label").textContent = powerBusy ? (on ? "Stopping…" : "Starting…") : on ? "On" : "Off";
+  sw.classList.toggle("busy", powerBusy);
+  sw.disabled = powerBusy;
+  document.body.classList.toggle("off", !on);
+  $("off-card").classList.toggle("hidden", on);
+  if (!on) {
+    pill("pill-sim", "", "X-Plane");
+    $("banner").classList.add("hidden");
   }
-});
+}
+
+async function setPower(on) {
+  if (powerBusy) return;
+  powerBusy = true;
+  renderPower(poweredOn);
+  try {
+    const st = await T.core.invoke(on ? "power_on" : "power_off");
+    powerBusy = false;
+    renderPower(st.on);
+  } catch (e) {
+    powerBusy = false;
+    renderPower(poweredOn);
+    alert(String(e));
+  }
+  if (poweredOn) refresh();
+}
+
+$("power").addEventListener("click", () => setPower(!poweredOn));
+$("btn-turn-on").addEventListener("click", () => setPower(true));
 
 // ---------------------------------------------------------------- logs
 function addLog(l) {
@@ -699,11 +721,18 @@ $("btn-update").addEventListener("click", async (ev) => {
 
 // ---------------------------------------------------------------- wiring
 async function refresh() {
+  if (powerBusy) return;
   try {
+    const st = await T.core.invoke("power_state");
+    if (!st.on) {
+      // Switched off; a daemon may still be finishing its exit.
+      renderPower(false);
+      return;
+    }
+    renderPower(true);
     renderStatus(await rpc("status"));
     renderHealth(await rpc("health"));
   } catch (e) {
-    pill("pill-daemon", "err", "daemon offline");
     $("banner").classList.remove("hidden");
     $("banner").textContent = "Cannot reach the ButterSat daemon: " + e;
   }
@@ -723,7 +752,6 @@ T.event.listen("daemon-event", ({ payload }) => {
   }
 });
 T.event.listen("daemon-disconnected", () => {
-  pill("pill-daemon", "err", "daemon offline");
   setTimeout(refresh, 2000);
 });
 

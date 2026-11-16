@@ -731,6 +731,29 @@ impl App {
         })
     }
 
+    /// Switch off: persist it, unmount, disable our scenery_packs.ini entry,
+    /// then exit.
+    fn turn_off(&self) -> anyhow::Result<()> {
+        let mut cfg = self.cfg.lock().clone();
+        cfg.startup.enabled = false;
+        cfg.save(&self.config_path)?;
+        let manage = cfg.mount.manage_scenery_packs;
+        *self.cfg.lock() = cfg;
+        self.unmount();
+        if manage {
+            if let Some(xp) = self.xplane.lock().clone() {
+                match xplane::set_scenery_pack_enabled(&xp, false) {
+                    Ok(true) => tracing::info!("disabled {} in scenery_packs.ini (backup written)", xplane::PACK_NAME),
+                    Ok(false) => {}
+                    Err(e) => tracing::warn!("scenery_packs.ini: {e:#}"),
+                }
+            }
+        }
+        tracing::info!("ButterSat switched off");
+        let _ = self.shutdown.send(true);
+        Ok(())
+    }
+
     /// Rebuild engine/mesh/scenery after a config change; remounts if needed.
     fn rebuild(&self) -> anyhow::Result<()> {
         let cfg = self.cfg.lock().clone();
@@ -776,6 +799,17 @@ impl App {
             method::SHUTDOWN => {
                 let _ = self.shutdown.send(true);
                 Ok(Value::Null)
+            }
+            method::TURN_OFF => {
+                if *self.web.connected.borrow() {
+                    return Err((-32010, "Close X-Plane first: turning ButterSat off removes its scenery.".into()));
+                }
+                let this = self.clone();
+                blocking(Box::new(move || {
+                    this.turn_off()?;
+                    Ok(Value::Null)
+                }))
+                .await
             }
             method::GET_CONFIG => Ok(json!(self.config())),
             method::SET_CONFIG => {

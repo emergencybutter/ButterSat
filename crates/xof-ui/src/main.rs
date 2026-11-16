@@ -1,6 +1,7 @@
 //! ButterSat control UI (design §10). A pure control plane: all work happens
 //! in `xof-daemon`, which this app starts if it isn't running and talks to
-//! over the local IPC socket. Closing the window never unmounts.
+//! over the local IPC socket. Closing the window never unmounts; the On/Off
+//! switch ([`xof_proto::power`]) does.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -11,61 +12,37 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::Mutex;
-use xof_proto::{method, Client, Status};
+use xof_proto::config::{DaemonConfig, Dirs};
+use xof_proto::{method, power, Client, Status};
 
 #[derive(Default)]
 struct Conn(Mutex<Option<Client>>);
 
-/// Path of the daemon binary shipped next to this executable.
-fn daemon_path() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    let name = if cfg!(windows) { "xof-daemon.exe" } else { "xof-daemon" };
-    let p = dir.join(name);
-    p.exists().then_some(p)
+/// This executable's folder, where the daemon binary ships.
+fn exe_dir() -> PathBuf {
+    std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from)).unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// Start the daemon detached so it outlives the UI.
-fn spawn_daemon() -> anyhow::Result<()> {
-    let path = daemon_path().ok_or_else(|| anyhow::anyhow!("xof-daemon not found next to the app"))?;
-    let mut cmd = std::process::Command::new(path);
-    cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
-    cmd.spawn()?;
-    Ok(())
+/// The persisted On/Off switch.
+fn switched_on() -> bool {
+    DaemonConfig::load(&Dirs::standard().config_file).map(|c| c.startup.enabled).unwrap_or(true)
 }
 
-/// Connect, starting the daemon if needed; forwards daemon events to the
-/// window as `daemon-event`.
+const OFF: &str = "ButterSat is off";
+
+/// Connect, starting the daemon if ButterSat is switched on; forwards daemon
+/// events to the window as `daemon-event`. Errors with [`OFF`] when switched
+/// off and no daemon is running.
 async fn ensure(app: &AppHandle, conn: &Conn) -> Result<Client, String> {
     let mut guard = conn.0.lock().await;
     if let Some(c) = guard.as_ref() {
         return Ok(c.clone());
     }
-    let mut client = Client::connect().await.ok();
-    if client.is_none() {
-        spawn_daemon().map_err(|e| e.to_string())?;
-        for _ in 0..50 {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            if let Ok(c) = Client::connect().await {
-                client = Some(c);
-                break;
-            }
-        }
-    }
-    let client = client.ok_or("could not connect to xof-daemon")?;
+    let client = match Client::connect().await {
+        Ok(c) => c,
+        Err(_) if !switched_on() => return Err(OFF.into()),
+        Err(_) => power::turn_on(&exe_dir()).await.map_err(|e| e.to_string())?,
+    };
     let mut rx = client.subscribe().await.map_err(|e| e.to_string())?;
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -95,6 +72,30 @@ async fn rpc(app: AppHandle, conn: State<'_, Conn>, method: String, params: Opti
             Err(e.to_string())
         }
     }
+}
+
+/// The On/Off switch state.
+#[tauri::command]
+fn power_state() -> Value {
+    serde_json::json!({ "on": switched_on() })
+}
+
+/// Switch on: persist, start the daemon (it mounts and enables our
+/// scenery_packs.ini entry).
+#[tauri::command]
+async fn power_on(app: AppHandle, conn: State<'_, Conn>) -> Result<Value, String> {
+    power::turn_on(&exe_dir()).await.map_err(|e| e.to_string())?;
+    ensure(&app, &conn).await?;
+    Ok(power_state())
+}
+
+/// Switch off: unmount, disable our scenery_packs.ini entry, stop the daemon.
+/// Refused by the daemon while X-Plane is connected.
+#[tauri::command]
+async fn power_off(conn: State<'_, Conn>) -> Result<Value, String> {
+    power::turn_off().await.map_err(|e| e.to_string())?;
+    *conn.0.lock().await = None;
+    Ok(power_state())
 }
 
 /// Licence/attribution text shown in About.
@@ -173,7 +174,15 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Conn::default())
-        .invoke_handler(tauri::generate_handler![rpc, about, update_check, update_install])
+        .invoke_handler(tauri::generate_handler![
+            rpc,
+            power_state,
+            power_on,
+            power_off,
+            about,
+            update_check,
+            update_install
+        ])
         .run(tauri::generate_context!())
         .expect("error while running ButterSat");
 }

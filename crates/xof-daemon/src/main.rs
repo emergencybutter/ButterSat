@@ -89,6 +89,14 @@ fn main() -> anyhow::Result<()> {
     let config_path = args.config.unwrap_or_else(|| dirs.config_file.clone());
     tracing::info!("ButterSat daemon {} starting (config: {})", env!("CARGO_PKG_VERSION"), config_path.display());
 
+    // Switched off (the app's On/Off): don't run, e.g. when started at login.
+    if let Ok(cfg) = xof_proto::config::DaemonConfig::load(&config_path) {
+        if !cfg.startup.enabled {
+            tracing::info!("ButterSat is switched off; exiting (turn it on in the app or with `xof-cli on`)");
+            return Ok(());
+        }
+    }
+
     let _guard = rt.enter();
     let app = App::new(dirs, config_path, rt.handle().clone())?;
     // Route log events into the app's event stream.

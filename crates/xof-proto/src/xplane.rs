@@ -138,6 +138,32 @@ pub fn set_packs_enabled(ini: &str, pred: impl Fn(&str) -> bool, enabled: bool) 
     out
 }
 
+/// Turn our `scenery_packs.ini` entry on (adding it if missing) or off
+/// (`SCENERY_PACK_DISABLED`), with a timestamped backup when the file changes.
+/// Returns whether the file changed. A missing ini is left alone.
+pub fn set_scenery_pack_enabled(xp: &Path, enabled: bool) -> anyhow::Result<bool> {
+    let ini = xp.join("Custom Scenery").join("scenery_packs.ini");
+    let Ok(text) = std::fs::read_to_string(&ini) else { return Ok(false) };
+    let new = if enabled {
+        match insert_pack_entry(&text) {
+            Some(n) => n,
+            None => return Ok(false),
+        }
+    } else {
+        let n = set_packs_enabled(&text, |name| name.eq_ignore_ascii_case(PACK_NAME), false);
+        if n.trim_end() == text.trim_end() {
+            return Ok(false);
+        }
+        n
+    };
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    std::fs::copy(&ini, ini.with_file_name(format!("scenery_packs.ini.buttersat-{stamp}.bak")))?;
+    let tmp = ini.with_extension("ini.tmp");
+    std::fs::write(&tmp, new)?;
+    std::fs::rename(tmp, &ini)?;
+    Ok(true)
+}
+
 /// Apply [`insert_pack_entry`] to the install's ini, with a timestamped backup.
 /// A missing ini is left for X-Plane to create (it adds new packs itself).
 pub fn ensure_scenery_pack(xp: &Path) -> anyhow::Result<bool> {
@@ -221,6 +247,25 @@ mod tests {
         assert_eq!(l, [PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps\common\X-Plane 12")]);
         let mp = default_mount_point(&l[0]);
         assert!(!mp.to_string_lossy().contains('/'), "{}", mp.display());
+    }
+
+    #[test]
+    fn on_off_toggles_our_entry_only() {
+        let dir = std::env::temp_dir().join(format!("xof-onoff-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("Custom Scenery")).unwrap();
+        let ini = dir.join("Custom Scenery/scenery_packs.ini");
+        std::fs::write(&ini, INI).unwrap();
+        assert!(set_scenery_pack_enabled(&dir, true).unwrap(), "added");
+        assert!(std::fs::read_to_string(&ini).unwrap().contains("SCENERY_PACK Custom Scenery/z_buttersat/"));
+        assert!(!set_scenery_pack_enabled(&dir, true).unwrap(), "already on");
+        assert!(set_scenery_pack_enabled(&dir, false).unwrap(), "disabled");
+        let off = std::fs::read_to_string(&ini).unwrap();
+        assert!(off.contains("SCENERY_PACK_DISABLED Custom Scenery/z_buttersat/"));
+        assert!(off.contains("SCENERY_PACK Custom Scenery/zOrtho4XP_+40-074/"), "others untouched");
+        assert!(!set_scenery_pack_enabled(&dir, false).unwrap(), "already off");
+        assert!(set_scenery_pack_enabled(&dir, true).unwrap(), "re-enabled");
+        assert_eq!(std::fs::read_to_string(&ini).unwrap().matches("z_buttersat").count(), 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

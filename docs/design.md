@@ -92,7 +92,15 @@ X-Plane 12 ──Web API (ws, :8086)───────────► │  �
 
 - **Daemon owns the data plane.** The UI is a pure control plane; closing or
   crashing it never unmounts. The UI spawns the daemon as a detached helper if
-  none is running; the daemon only unmounts on explicit `shutdown`.
+  none is running and ButterSat is switched on.
+- **One On/Off switch** (app header, `xof-cli on|off`; `startup.enabled`).
+  On: start the daemon, which mounts and adds or re-enables our
+  `scenery_packs.ini` entry. Off: unmount, set the entry to
+  `SCENERY_PACK_DISABLED`, stop the daemon; persisted, so neither the app nor
+  the login entry restarts it. Refused while X-Plane is connected. There is
+  no "running but unmounted" state in the app; finer controls (`mount`,
+  `unmount`, `mount.auto_mount`, `mount.manage_scenery_packs`) are CLI/config
+  only. `xof-cli shutdown` (installer upgrades) stops without switching off.
 - Optional start-at-login (Windows: per-user `HKCU\…\Run` entry;
   Linux: systemd user unit; macOS: launchd agent).
 

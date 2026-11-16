@@ -6941,6 +6941,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "toml 0.8.2",
+ "windows 0.61.3",
  "xof-core",
  "xof-mesh",
 ]

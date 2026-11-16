@@ -52,6 +52,7 @@ Installers: `pwsh scripts/stage-release.ps1`, then
 ## Using the CLI
 
 ```sh
+xof-cli on | off          # the app's switch: mount + enable our scenery_packs.ini entry, or unmount + disable it
 xof-cli status            # mount, X-Plane, imagery, mesh, prefetch
 xof-cli health            # what's wrong and how to fix it
 xof-cli prepare KJFK      # warm meshes + imagery around an airport

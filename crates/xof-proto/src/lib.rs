@@ -3,6 +3,7 @@
 //! shared configuration and status types.
 
 pub mod config;
+pub mod power;
 pub mod xplane;
 
 use std::collections::HashMap;
@@ -43,6 +44,9 @@ pub mod method {
     pub const PACKS_IMPORT: &str = "packs_import";
     /// `{ path }` -> [`crate::StorageInfo`] for a candidate cache folder.
     pub const STORAGE_INFO: &str = "storage_info";
+    /// Switch ButterSat off: persist `startup.enabled = false`, unmount,
+    /// disable our scenery_packs.ini entry, exit. Refused while X-Plane runs.
+    pub const TURN_OFF: &str = "turn_off";
     /// `{ since? }` -> `Vec<HistorySample>` (5 s samples, last 2 h).
     pub const HISTORY: &str = "history";
     /// `{ path, mode: "move" | "fresh" }`: change the cache folder (background job).
