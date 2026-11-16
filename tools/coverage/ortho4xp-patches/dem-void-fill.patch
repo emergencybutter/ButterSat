@@ -1,0 +1,25 @@
+--- a/src/O4_DEM_Utils.py	2026-11-15 20:05:23.918534700 -0500
++++ b/src/O4_DEM_Utils.py	2026-11-15 20:05:23.986244500 -0500
+@@ -48,6 +48,22 @@
+         self.load_data(source, info_only)
+         if info_only:
+             return
++        # ButterSat patch: USGS NED marks voids (Great Lakes, outside coverage)
++        # as NaN, which never equals self.nodata, so the fills below missed
++        # them and the DSF step crashed ("cannot convert float NaN to
++        # integer"). Fill every void (NaN or nodata) from the nearest valid
++        # elevation in one pass: lake surfaces take their shoreline level.
++        try:
++            voids = numpy.isnan(self.alt_dem) | (self.alt_dem == self.nodata)
++            if voids.any() and not voids.all():
++                from scipy import ndimage
++                idx = ndimage.distance_transform_edt(voids, return_distances=False, return_indices=True)
++                self.alt_dem = self.alt_dem[tuple(idx)]
++                UI.vprint(1, "   INFO: filled", int(voids.sum()), "elevation voids from nearest valid values.")
++            elif voids.all():
++                self.alt_dem[:] = 0
++        except Exception as e:
++            UI.vprint(1, "   WARNING: void fill failed:", e)
+         if fill_nodata == "to zero":
+             self.nodata_to_zero()
+         elif fill_nodata:
