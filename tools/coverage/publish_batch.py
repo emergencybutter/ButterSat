@@ -236,12 +236,15 @@ def main():
 
     env = r2_env()
     version = datetime.datetime.now(datetime.timezone.utc).strftime("%Y.%m.%d.%H%M")
-    cmd = [XOF_PUBLISH, "build", "--tiles", *dirs, "--out", STAGE, "--key", KEY, "--version", version,
-           "--mirror", r2_url(env), "--mirror", SELFHOST_URL, "--build-config", CFG, "--strip-rasters"]
-    for line in ATTRIBUTION:
-        cmd += ["--attribution", line]
+    # Windows caps a command line at 32,767 characters (~600 tile paths):
+    # build in batches; each one adds to the staged catalog (superset).
     print("building catalog", version)
-    subprocess.run(cmd, check=True)
+    for i in range(0, len(dirs), 300):
+        cmd = [XOF_PUBLISH, "build", "--tiles", *dirs[i:i + 300], "--out", STAGE, "--key", KEY, "--version",
+               version, "--mirror", r2_url(env), "--mirror", SELFHOST_URL, "--build-config", CFG, "--strip-rasters"]
+        for line in ATTRIBUTION:
+            cmd += ["--attribution", line]
+        subprocess.run(cmd, check=True)
 
     upload_and_verify()
     published |= set(new)
