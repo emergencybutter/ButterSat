@@ -56,6 +56,7 @@ ATTRIBUTION = [
 ]
 LAST = ["LICENSE", "ATTRIBUTION", "manifest.json.zst.sig", "manifest.json.zst"]
 IMMUTABLE = "public, max-age=31536000, immutable"
+R2_WORKERS = 16
 
 
 def ssh(cmd, **kw):
@@ -197,9 +198,14 @@ def main():
     ap.add_argument("--box", nargs=4, type=int, metavar=("LAT0", "LAT1", "LON0", "LON1"),
                     help="only publish tiles in this inclusive range")
     ap.add_argument("--only", help="JSON from classify_tiles.py: publish only its 'complete' tiles")
+    ap.add_argument("--r2-workers", type=int, default=16,
+                    help="parallel R2 uploads; fewer leaves upstream room for other traffic "
+                         "(a saturated upstream also slows every download on the link)")
     ap.add_argument("--sync", action="store_true",
                     help="no build: upload what either host lacks for the current staged catalog")
     a = ap.parse_args()
+    global R2_WORKERS
+    R2_WORKERS = a.r2_workers
     if a.sync:
         return sync(a.go)
 
@@ -273,7 +279,7 @@ def upload_and_verify(dry_run=False):
         return
 
     selfhost_upload(to_selfhost)
-    r2_upload(s3, bucket, to_r2, IMMUTABLE)
+    r2_upload(s3, bucket, to_r2, IMMUTABLE, workers=R2_WORKERS)
     # Signature before manifest on each host: a client never sees a manifest
     # without its signature.
     for rel in LAST:
