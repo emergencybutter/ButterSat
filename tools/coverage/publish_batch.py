@@ -282,6 +282,12 @@ def sync(go):
         published = set(json.load(open(pub_path))) if os.path.exists(pub_path) else set()
         state = json.load(open(os.path.join(ROOT, "state.json")))
         live = {t for t in manifest["tiles"] if state.get(t, {}).get("status") == "done"}
+        # Tiles being rebuilt (US border tiles recut from the planet) are in
+        # the staged catalog with their old version: leave them unpublished
+        # so the rebuilt version goes out with the next publish.
+        border_path = os.path.join(ROOT, "border_rebuild.json")
+        if os.path.exists(border_path):
+            live -= set(json.load(open(border_path))) - published
         added = live - published
         with open(pub_path + ".tmp", "w") as f:
             json.dump(sorted(published | live), f, indent=1)
