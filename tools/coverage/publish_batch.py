@@ -214,6 +214,9 @@ def main():
     ap.add_argument("--box", nargs=4, type=int, metavar=("LAT0", "LAT1", "LON0", "LON1"),
                     help="only publish tiles in this inclusive range")
     ap.add_argument("--only", help="JSON from classify_tiles.py: publish only its 'complete' tiles")
+    ap.add_argument("--prune", action="store_true",
+                    help="after a verified publish, delete the raw DSFs of the tiles just made live "
+                         "(the compressed copy stays in the staging catalog; frees ~2x their size)")
     ap.add_argument("--r2-workers", type=int, default=16,
                     help="parallel R2 uploads; fewer leaves upstream room for other traffic "
                          "(a saturated upstream also slows every download on the link)")
@@ -268,6 +271,24 @@ def main():
         json.dump(sorted(published), f, indent=1)
     os.replace(pub_path + ".tmp", pub_path)
     print(f"published {version}: {len(published)} built tiles in total (plus the pilot)")
+    if a.prune:
+        prune(new)
+
+
+def prune(tiles):
+    """Delete the raw DSFs of verified-live tiles. Only called after
+    upload_and_verify succeeded (it exits on any failure)."""
+    freed = 0
+    for t in tiles:
+        lat, lon = int(t[:3]), int(t[3:])
+        d = os.path.join(O4_TILES, f"zOrtho4XP_{t}", "Earth nav data")
+        for root, _, files in os.walk(d):
+            for f in files:
+                if f.endswith(".dsf"):
+                    p = os.path.join(root, f)
+                    freed += os.path.getsize(p)
+                    os.remove(p)
+    print(f"pruned raw DSFs of {len(tiles)} published tiles: {freed / 1e9:.1f} GB freed")
 
 
 def sync(go):
