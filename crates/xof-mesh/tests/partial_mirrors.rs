@@ -73,3 +73,46 @@ async fn object_missing_on_first_mirror_comes_from_the_next() {
 
     let _ = std::fs::remove_dir_all(base);
 }
+
+/// Serves 500 for the first `fail` requests, then the body.
+async fn flaky(body: Vec<u8>, fail: usize) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    tokio::spawn(async move {
+        loop {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let body = body.clone();
+            let n = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let _ = s.read(&mut buf).await;
+                let resp = if n < fail {
+                    b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+                } else {
+                    let mut r =
+                        format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len())
+                            .into_bytes();
+                    r.extend_from_slice(&body);
+                    r
+                };
+                let _ = s.write_all(&resp).await;
+            });
+        }
+    });
+    format!("http://{addr}/v1")
+}
+
+/// A transient failure must not become a read error (X-Plane crashes on
+/// those): the fetch retries and succeeds.
+#[tokio::test]
+async fn transient_failure_is_retried() {
+    let cache = std::env::temp_dir().join(format!("xof-flaky-{}", std::process::id()));
+    let body = b"tile".to_vec();
+    let url = flaky(body.clone(), 1).await;
+    let client = CatalogClient::new(vec![], &cache).unwrap();
+    let t = std::time::Instant::now();
+    assert_eq!(client.fetch_object(&[url], &object("tiles/x.dsf.zst", &body)).await.unwrap(), body);
+    assert!(t.elapsed() >= std::time::Duration::from_secs(2), "retried after backoff");
+    let _ = std::fs::remove_dir_all(cache);
+}

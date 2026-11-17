@@ -182,12 +182,21 @@ pub enum Refresh {
     Unchanged,
 }
 
+/// How long a mesh object fetch keeps retrying transient failures before the
+/// read fails (X-Plane waits meanwhile; a read error crashes it). Stays well
+/// under the VFS request timeout (WinFsp IrpTimeout, set to 10 min).
+pub const OBJECT_RETRY_WINDOW: Duration = Duration::from_secs(240);
+
 impl CatalogClient {
     pub fn new(keys: Vec<VerifyingKey>, cache_dir: &Path) -> anyhow::Result<Self> {
         std::fs::create_dir_all(cache_dir)?;
         let http = reqwest::Client::builder()
             .user_agent(concat!("ButterSat/", env!("CARGO_PKG_VERSION")))
-            .timeout(Duration::from_secs(60))
+            // Idle timeout, not a total one: a 60 s cap cut off big DSFs on
+            // a slow link while data was still flowing, X-Plane got a read
+            // error and crashed (2026-11-17, KTVC).
+            .connect_timeout(Duration::from_secs(15))
+            .read_timeout(Duration::from_secs(30))
             .build()?;
         Ok(Self { http, keys, cache_dir: cache_dir.to_path_buf(), preferred: Default::default() })
     }
@@ -287,7 +296,32 @@ impl CatalogClient {
     /// so it moves on quietly without demoting the mirror. Other errors
     /// (unreachable, 5xx, bad hash) count as mirror failures.
     pub async fn fetch_object(&self, mirrors: &[String], obj: &Object) -> anyhow::Result<Vec<u8>> {
+        // A failed read makes X-Plane crash, so transient failures (network,
+        // timeouts, cut transfers, 5xx/429) are retried across all mirrors
+        // with backoff for up to OBJECT_RETRY_WINDOW; X-Plane waits instead.
+        // A 404 everywhere or a corrupt copy is final.
+        let started = std::time::Instant::now();
+        let mut delay = Duration::from_secs(2);
+        loop {
+            match self.fetch_object_once(mirrors, obj).await {
+                Ok(d) => return Ok(d),
+                Err((e, transient)) => {
+                    if !transient || started.elapsed() + delay > OBJECT_RETRY_WINDOW {
+                        return Err(e);
+                    }
+                    tracing::warn!("{}: {e:#}; retrying in {}s", obj.object, delay.as_secs());
+                    tokio::time::sleep(delay).await;
+                    delay = (delay * 2).min(Duration::from_secs(30));
+                }
+            }
+        }
+    }
+
+    /// One pass over the mirrors. Err carries whether a retry could help
+    /// (some mirror failed transiently).
+    async fn fetch_object_once(&self, mirrors: &[String], obj: &Object) -> Result<Vec<u8>, (anyhow::Error, bool)> {
         let mut last_err = anyhow::anyhow!("no mirrors configured");
+        let mut transient = false;
         for base in &self.ordered(mirrors) {
             let res: anyhow::Result<Option<Vec<u8>>> = async {
                 let resp = self.http.get(join_url(base, &obj.object)).send().await?;
@@ -307,16 +341,30 @@ impl CatalogClient {
                 }
                 Ok(None) => {
                     tracing::debug!("object {} not on {base}", obj.object);
-                    last_err = anyhow::anyhow!("{} not found on any mirror", obj.object);
+                    if !transient {
+                        last_err = anyhow::anyhow!("{} not found on any mirror", obj.object);
+                    }
                 }
                 Err(e) => {
+                    transient |= is_transient(&e);
                     tracing::warn!("object {} from {base}: {e}", obj.object);
                     self.mark(base, false);
                     last_err = e;
                 }
             }
         }
-        Err(last_err)
+        Err((last_err, transient))
+    }
+}
+
+/// Network trouble, timeouts, cut transfers, overload: worth retrying.
+fn is_transient(e: &anyhow::Error) -> bool {
+    match e.downcast_ref::<reqwest::Error>() {
+        Some(r) => match r.status() {
+            Some(s) => s.is_server_error() || s == reqwest::StatusCode::TOO_MANY_REQUESTS,
+            None => true,
+        },
+        None => false, // size/hash mismatch: a corrupt copy stays corrupt
     }
 }
 

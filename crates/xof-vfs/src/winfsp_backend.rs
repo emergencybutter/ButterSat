@@ -286,6 +286,11 @@ impl Mount {
             .volume_creation_time(filetime(SystemTime::now()))
             .volume_serial_number(0x0f0f_2026)
             .file_info_timeout(2000)
+            // A read may wait minutes for a mesh download (retries across
+            // mirrors); WinFsp cancels requests after IrpTimeout (default 5
+            // min), which X-Plane sees as a read error and crashes. 10 min is
+            // WinFsp's maximum.
+            .irp_timeout(600_000)
             .case_sensitive_search(false)
             .case_preserved_names(true)
             .unicode_on_disk(true)
