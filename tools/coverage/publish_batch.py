@@ -69,6 +69,7 @@ def r2_env():
 
 def r2_client(env):
     import boto3
+    from botocore.config import Config
 
     return boto3.client(
         "s3",
@@ -76,6 +77,7 @@ def r2_client(env):
         aws_access_key_id=env["R2_ACCESS_KEY_ID"],
         aws_secret_access_key=env["R2_SECRET_ACCESS_KEY"],
         region_name="auto",
+        config=Config(retries={"max_attempts": 10, "mode": "adaptive"}, max_pool_connections=32),
     )
 
 
@@ -159,15 +161,29 @@ def r2_upload(s3, bucket, rels, cache_control, workers=16):
     v1 = os.path.join(STAGE, "v1")
 
     def put(rel):
-        with open(os.path.join(v1, rel), "rb") as f:
-            s3.put_object(
-                Bucket=bucket,
-                Key="v1/" + rel,
-                Body=f,
-                CacheControl=cache_control,
-                ContentType="text/plain; charset=utf-8" if rel in ("LICENSE", "ATTRIBUTION", "manifest.json.zst.sig")
-                else "application/octet-stream",
-            )
+        # Connection drops (SSL EOF, resets) are not all retried by botocore:
+        # retry the whole put a few times before giving up.
+        import time
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        for attempt in range(6):
+            try:
+                with open(os.path.join(v1, rel), "rb") as f:
+                    s3.put_object(
+                        Bucket=bucket,
+                        Key="v1/" + rel,
+                        Body=f,
+                        CacheControl=cache_control,
+                        ContentType="text/plain; charset=utf-8"
+                        if rel in ("LICENSE", "ATTRIBUTION", "manifest.json.zst.sig")
+                        else "application/octet-stream",
+                    )
+                return
+            except (BotoCoreError, ClientError, OSError) as e:
+                if attempt == 5:
+                    raise
+                print(f"  retry {rel}: {e}", flush=True)
+                time.sleep(2 ** attempt)
 
     done = 0
     with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -255,9 +271,22 @@ def main():
 
 
 def sync(go):
-    hosts = objects_by_host(staged_manifest())
+    manifest = staged_manifest()
+    hosts = objects_by_host(manifest)
     print(f"staged catalog: {len(hosts['r2'])} objects (R2), {len(hosts['selfhost'])} (selfhost)")
     upload_and_verify(dry_run=not go)
+    if go:
+        # Everything in the verified staged catalog is live now (e.g. resuming
+        # a publish that died mid-upload): record it so it is not rebuilt.
+        pub_path = os.path.join(ROOT, "published.json")
+        published = set(json.load(open(pub_path))) if os.path.exists(pub_path) else set()
+        state = json.load(open(os.path.join(ROOT, "state.json")))
+        live = {t for t in manifest["tiles"] if state.get(t, {}).get("status") == "done"}
+        added = live - published
+        with open(pub_path + ".tmp", "w") as f:
+            json.dump(sorted(published | live), f, indent=1)
+        os.replace(pub_path + ".tmp", pub_path)
+        print(f"catalog {manifest['catalog_version']} live; {len(added)} tiles newly recorded as published")
 
 
 def upload_and_verify(dry_run=False):
