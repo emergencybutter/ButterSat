@@ -394,12 +394,20 @@ impl Scenery {
                     return Err("not cached".into());
                 }
                 let t = *t;
-                self.rt.block_on(async move { mesh.read_dsf(t, off, len).await })
+                let r = self.rt.block_on(async move { mesh.read_dsf(t, off, len).await });
+                if let (Err(e), ReaderClass::XPlane) = (&r, class) {
+                    tracing::error!("read error returned to X-Plane for mesh tile {t} @{off}: {e} (X-Plane may crash)");
+                }
+                r
             }
             Node::Mask(n) => {
                 let mesh = self.mesh.clone().ok_or("no mesh")?;
                 let n = n.clone();
-                self.rt.block_on(async move { mesh.read_mask(&n, off, len).await })
+                let r = self.rt.block_on(async move { mesh.read_mask(&n, off, len).await });
+                if let (Err(e), ReaderClass::XPlane) = (&r, class) {
+                    tracing::error!("read error returned to X-Plane for mask {node:?} @{off}: {e} (X-Plane may crash)");
+                }
+                r
             }
             Node::Dds(t) => {
                 let ctx = match class {

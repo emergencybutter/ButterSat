@@ -67,9 +67,18 @@ pub fn spawn(port: u16) -> WebApi {
     let fr = frames.clone();
     tokio::spawn(async move {
         loop {
-            match session(port, &atx, &ctx, &fr).await {
-                Ok(()) => tracing::info!("X-Plane Web API session ended"),
-                Err(e) => tracing::debug!("X-Plane Web API: {e:#}"),
+            let started = std::time::Instant::now();
+            let result = session(port, &atx, &ctx, &fr).await;
+            if *ctx.borrow() {
+                // Was connected: X-Plane quit or crashed. Look at X-Plane's
+                // Log.txt / Output/crash_reports around this time.
+                let mins = started.elapsed().as_secs_f64() / 60.0;
+                match &result {
+                    Ok(()) => tracing::info!("X-Plane disconnected after {mins:.1} min (quit or crash)"),
+                    Err(e) => tracing::warn!("X-Plane connection lost after {mins:.1} min (quit or crash): {e:#}"),
+                }
+            } else if let Err(e) = &result {
+                tracing::debug!("X-Plane Web API: {e:#}");
             }
             let _ = ctx.send(false);
             *fr.lock() = Frames::default();

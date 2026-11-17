@@ -323,15 +323,20 @@ impl CatalogClient {
         let mut last_err = anyhow::anyhow!("no mirrors configured");
         let mut transient = false;
         for base in &self.ordered(mirrors) {
+            let t0 = std::time::Instant::now();
             let res: anyhow::Result<Option<Vec<u8>>> = async {
                 let resp = self.http.get(join_url(base, &obj.object)).send().await?;
                 if resp.status() == reqwest::StatusCode::NOT_FOUND {
                     return Ok(None);
                 }
-                let data = resp.error_for_status()?.bytes().await?;
+                let resp = resp.error_for_status()?;
+                let cache =
+                    resp.headers().get("cf-cache-status").and_then(|v| v.to_str().ok()).unwrap_or("-").to_string();
+                let data = resp.bytes().await?;
                 anyhow::ensure!(data.len() as u64 == obj.size, "size mismatch for {}", obj.object);
                 let h = blake3::hash(&data).to_hex();
                 anyhow::ensure!(h.as_str() == obj.blake3, "hash mismatch for {}", obj.object);
+                log_download(&obj.object, base, data.len(), t0.elapsed(), &cache);
                 Ok(Some(data.to_vec()))
             }
             .await;
@@ -354,6 +359,26 @@ impl CatalogClient {
             }
         }
         Err((last_err, transient))
+    }
+}
+
+/// One line per mesh download (DSFs at info, the many small masks at debug);
+/// a warning when a sizeable object comes in below 1 MB/s.
+fn log_download(object: &str, base: &str, bytes: usize, took: Duration, cache: &str) {
+    let secs = took.as_secs_f64().max(0.001);
+    let mbps = bytes as f64 / 1e6 / secs;
+    if bytes >= 1_000_000 && mbps < 1.0 {
+        tracing::warn!(
+            "slow download: {object} {:.1} MB in {secs:.1} s ({mbps:.2} MB/s) from {base} (cdn {cache})",
+            bytes as f64 / 1e6
+        );
+    } else if object.starts_with("tiles/") {
+        tracing::info!(
+            "downloaded {object} {:.1} MB in {secs:.1} s ({mbps:.1} MB/s) from {base} (cdn {cache})",
+            bytes as f64 / 1e6
+        );
+    } else {
+        tracing::debug!("downloaded {object} {bytes} B in {secs:.2} s from {base} (cdn {cache})");
     }
 }
 

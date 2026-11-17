@@ -77,7 +77,13 @@ fn main() -> anyhow::Result<()> {
     let (log_tx, _) = tokio::sync::broadcast::channel(512);
     let log_dir = dirs.data.join("logs");
     std::fs::create_dir_all(&log_dir)?;
-    let log_file = std::fs::OpenOptions::new().create(true).append(true).open(log_dir.join("daemon.log"))?;
+    // Keep logs bounded (one line per mesh download adds up): past 10 MB the
+    // current log becomes daemon.log.1, replacing the previous one.
+    let log_path = log_dir.join("daemon.log");
+    if std::fs::metadata(&log_path).map(|m| m.len() > 10 << 20).unwrap_or(false) {
+        let _ = std::fs::rename(&log_path, log_dir.join("daemon.log.1"));
+    }
+    let log_file = std::fs::OpenOptions::new().create(true).append(true).open(&log_path)?;
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::try_new(&args.log).unwrap_or_else(|_| "info".into()))
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))

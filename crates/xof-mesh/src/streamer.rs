@@ -440,7 +440,11 @@ impl MeshStreamer {
     pub async fn read_dsf(self: &Arc<Self>, t: DsfTile, off: u64, len: u64) -> Result<Vec<u8>, String> {
         let started = std::time::Instant::now();
         let path = self.ensure_dsf(t).await?;
-        self.stats.waits_ms.fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+        let waited = started.elapsed();
+        self.stats.waits_ms.fetch_add(waited.as_millis() as u64, Ordering::Relaxed);
+        if waited.as_secs() >= 5 {
+            tracing::warn!("X-Plane waited {:.1} s for mesh tile {t}", waited.as_secs_f64());
+        }
         read_range(&path, off, len).await.map_err(|e| e.to_string())
     }
 
