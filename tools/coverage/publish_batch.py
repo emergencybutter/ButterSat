@@ -8,10 +8,12 @@
   <root>/published.json. The staging catalog (<root>/publish/v1) holds the
   previous release, so `xof-publish build` only compresses the new tiles and
   the manifest stays a superset.
-- Two partial mirrors share one signed manifest: objects of tiles inside the
-  continental-US box live on selfhost (satsrv.butr.cc), everything else on
-  Cloudflare R2 (tiles.butr.cc). The manifest lists both mirrors; clients try
-  them in order and a 404 moves on to the next.
+- Two mirrors share one signed manifest: Cloudflare R2 (tiles.butr.cc) holds
+  everything; selfhost (satsrv.butr.cc) holds the continental-US tiles as a second
+  mirror. The manifest lists R2 first; clients try mirrors in order and a 404
+  moves on to the next.
+- `--sync` uploads whatever either host lacks for the current staged catalog
+  (no build), e.g. after adding a host.
 - Upload: only objects each host lacks, objects first, then LICENSE,
   ATTRIBUTION, the signature and the manifest last on both hosts (atomic
   switch for clients).
@@ -103,13 +105,16 @@ def staged_manifest():
 
 
 def objects_by_host(manifest):
-    """{"selfhost": {rel: (size, blake3)}, "r2": {...}} from the manifest."""
+    """{"selfhost": {rel: (size, blake3)}, "r2": {...}}: R2 gets every object,
+    selfhost the continental-US ones."""
     hosts = {"selfhost": {}, "r2": {}}
     for tile, e in manifest["tiles"].items():
-        h = hosts["selfhost" if in_us(tile) else "r2"]
-        h[e["dsf"]["object"]] = (e["dsf"]["size"], e["dsf"]["blake3"])
+        objs = {e["dsf"]["object"]: (e["dsf"]["size"], e["dsf"]["blake3"])}
         for m in e.get("masks", []):
-            h[m["object"]] = (m["size"], m["blake3"])
+            objs[m["object"]] = (m["size"], m["blake3"])
+        hosts["r2"].update(objs)
+        if in_us(tile):
+            hosts["selfhost"].update(objs)
     return hosts
 
 
@@ -192,7 +197,11 @@ def main():
     ap.add_argument("--box", nargs=4, type=int, metavar=("LAT0", "LAT1", "LON0", "LON1"),
                     help="only publish tiles in this inclusive range")
     ap.add_argument("--only", help="JSON from classify_tiles.py: publish only its 'complete' tiles")
+    ap.add_argument("--sync", action="store_true",
+                    help="no build: upload what either host lacks for the current staged catalog")
     a = ap.parse_args()
+    if a.sync:
+        return sync(a.go)
 
     state = json.load(open(os.path.join(ROOT, "state.json")))
     pub_path = os.path.join(ROOT, "published.json")
@@ -215,12 +224,11 @@ def main():
     if missing:
         sys.exit(f"missing tile folders: {missing[:5]}")
     us = sum(in_us(t) for t in new)
-    print(f"{len(new)} new tiles to publish ({us} to selfhost, {len(new) - us} to R2; {len(published)} already published)")
+    print(f"{len(new)} new tiles to publish (all to R2, {us} of them also to selfhost; {len(published)} already published)")
     if not new or not a.go:
         return
 
     env = r2_env()
-    s3, bucket = r2_client(env), env["R2_BUCKET"]
     version = datetime.datetime.now(datetime.timezone.utc).strftime("%Y.%m.%d.%H%M")
     cmd = [XOF_PUBLISH, "build", "--tiles", *dirs, "--out", STAGE, "--key", KEY, "--version", version,
            "--mirror", r2_url(env), "--mirror", SELFHOST_URL, "--build-config", CFG, "--strip-rasters"]
@@ -229,6 +237,23 @@ def main():
     print("building catalog", version)
     subprocess.run(cmd, check=True)
 
+    upload_and_verify()
+    published |= set(new)
+    with open(pub_path + ".tmp", "w") as f:
+        json.dump(sorted(published), f, indent=1)
+    os.replace(pub_path + ".tmp", pub_path)
+    print(f"published {version}: {len(published)} built tiles in total (plus the pilot)")
+
+
+def sync(go):
+    hosts = objects_by_host(staged_manifest())
+    print(f"staged catalog: {len(hosts['r2'])} objects (R2), {len(hosts['selfhost'])} (selfhost)")
+    upload_and_verify(dry_run=not go)
+
+
+def upload_and_verify(dry_run=False):
+    env = r2_env()
+    s3, bucket = r2_client(env), env["R2_BUCKET"]
     local = local_files()
     hosts = objects_by_host(staged_manifest())
 
@@ -244,6 +269,8 @@ def main():
     to_r2 = [r for r in hosts["r2"] if r2have.get(r) != local[r]]
     print(f"R2: upload {len(to_r2)} objects, {sum(local[r] for r in to_r2) / 1e9:.1f} GB "
           f"(bucket holds {len(r2have)} objects)")
+    if dry_run:
+        return
 
     selfhost_upload(to_selfhost)
     r2_upload(s3, bucket, to_r2, IMMUTABLE)
@@ -258,12 +285,8 @@ def main():
         subprocess.run([XOF_PUBLISH, "verify", "--origin", base, "--pubkey", PUBKEY, "--sample", "0"], check=True)
     check_objects(SELFHOST_URL, hosts["selfhost"])
     check_objects(r2_url(env), hosts["r2"])
-
-    published |= set(new)
-    with open(pub_path + ".tmp", "w") as f:
-        json.dump(sorted(published), f, indent=1)
-    os.replace(pub_path + ".tmp", pub_path)
-    print(f"published {version}: {len(published)} built tiles in total (plus the pilot)")
+    us_r2 = {r: v for r, v in hosts["r2"].items() if r in hosts["selfhost"]}
+    check_objects(r2_url(env), us_r2)
 
 
 if __name__ == "__main__":
