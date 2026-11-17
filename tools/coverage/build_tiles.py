@@ -124,6 +124,45 @@ def dem_for(o4, lat, lon):
     return VIEW_DEM
 
 
+def tidy(o4, osm_tiles, state, t, done):
+    """Free disk as the build goes (~200 MB per tile otherwise, far too much
+    for the world): a built tile's .alt/.node/.poly/.weight/.apt are never
+    read again; its .mesh is read only by neighbours still to be built (edge
+    stitching), so it goes once all 8 neighbours are settled. Called for each
+    finished tile and its neighbours."""
+    lat, lon = int(t[:3]), int(t[3:])
+
+    def settled(lt, ln):
+        n = tile_name(lt, ln)
+        st = state.get(n, {}).get("status")
+        cut = os.path.join(osm_tiles, f"{n}.osm.pbf")
+        no_data = not os.path.exists(cut) or os.path.getsize(cut) <= 512
+        return st in ("done", "skipped") or no_data
+
+    def files(n, exts):
+        d = os.path.join(o4, "Tiles", f"zOrtho4XP_{n}")
+        return [os.path.join(d, f"Data{n}.{e}") for e in exts]
+
+    freed = 0
+    if done:
+        for f in files(t, ("alt", "node", "poly", "weight", "apt")):
+            if os.path.exists(f):
+                freed += os.path.getsize(f)
+                os.remove(f)
+    for a in (-1, 0, 1):
+        for b in (-1, 0, 1):
+            lt, ln = lat + a, lon + b
+            n = tile_name(lt, ln)
+            if state.get(n, {}).get("status") != "done":
+                continue
+            if all(settled(lt + c, ln + d) for c in (-1, 0, 1) for d in (-1, 0, 1) if c or d):
+                for f in files(n, ("mesh",)):
+                    if os.path.exists(f):
+                        freed += os.path.getsize(f)
+                        os.remove(f)
+    return freed
+
+
 def clear_intermediates(o4, lat, lon):
     """The elevation is baked into Ortho4XP's intermediate files: drop them."""
     t = tile_name(lat, lon)
@@ -288,6 +327,12 @@ def main():
             size = os.path.getsize(dsf_path(a.o4, lat, lon)) if status == "done" else 0
             state.set(t, status=status, reason=reason, seconds=round(secs), dsf_bytes=size)
             log(f"{status} {t} in {secs / 60:.1f} min {size >> 20} MB {reason}")
+            with cond:  # never while a neighbour of a deleted mesh is building
+                busy = {tile_name(*r) for r in running if r != p}
+                snapshot = dict(state.data)
+                for n in busy:  # a running tile counts as unsettled
+                    snapshot[n] = {"status": "building"}
+                tidy(a.o4, a.osm_tiles, snapshot, t, status == "done")
         finally:
             with cond:
                 running.discard(p)
