@@ -172,6 +172,10 @@ pub struct CatalogClient {
     /// The mirror that last served us: tried first, so a dead mirror early
     /// in the list costs one failure, not one per object.
     preferred: std::sync::Mutex<Option<String>>,
+    /// Object bytes received so far, counted as they stream in (so the
+    /// activity chart shows a slow 60 s download as 60 s of traffic, not one
+    /// spike at the end).
+    received: std::sync::atomic::AtomicU64,
 }
 
 /// Outcome of a refresh.
@@ -198,7 +202,18 @@ impl CatalogClient {
             .connect_timeout(Duration::from_secs(15))
             .read_timeout(Duration::from_secs(30))
             .build()?;
-        Ok(Self { http, keys, cache_dir: cache_dir.to_path_buf(), preferred: Default::default() })
+        Ok(Self {
+            http,
+            keys,
+            cache_dir: cache_dir.to_path_buf(),
+            preferred: Default::default(),
+            received: Default::default(),
+        })
+    }
+
+    /// Object bytes received since start (streamed, including retries).
+    pub fn bytes_received(&self) -> u64 {
+        self.received.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// `mirrors` with the last good one first.
@@ -332,12 +347,17 @@ impl CatalogClient {
                 let resp = resp.error_for_status()?;
                 let cache =
                     resp.headers().get("cf-cache-status").and_then(|v| v.to_str().ok()).unwrap_or("-").to_string();
-                let data = resp.bytes().await?;
+                let mut resp = resp;
+                let mut data = Vec::with_capacity(obj.size.min(256 << 20) as usize);
+                while let Some(chunk) = resp.chunk().await? {
+                    self.received.fetch_add(chunk.len() as u64, std::sync::atomic::Ordering::Relaxed);
+                    data.extend_from_slice(&chunk);
+                }
                 anyhow::ensure!(data.len() as u64 == obj.size, "size mismatch for {}", obj.object);
                 let h = blake3::hash(&data).to_hex();
                 anyhow::ensure!(h.as_str() == obj.blake3, "hash mismatch for {}", obj.object);
                 log_download(&obj.object, base, data.len(), t0.elapsed(), &cache);
-                Ok(Some(data.to_vec()))
+                Ok(Some(data))
             }
             .await;
             match res {

@@ -404,7 +404,6 @@ impl MeshStreamer {
             _ => {
                 let d = self.client.fetch_object(&self.mirrors(), &e.dsf.object).await?;
                 self.stats.downloads.fetch_add(1, Ordering::Relaxed);
-                self.stats.download_bytes.fetch_add(d.len() as u64, Ordering::Relaxed);
                 let p = obj_path.clone();
                 let d2 = d.clone();
                 tokio::task::spawn_blocking(move || write_atomic(&p, &d2)).await??;
@@ -522,7 +521,7 @@ impl MeshStreamer {
             tiles_in_catalog: m.tiles.len(),
             tiles_listed: self.listed_tiles().len(),
             downloads: r(&self.stats.downloads),
-            download_bytes: r(&self.stats.download_bytes),
+            download_bytes: self.client.bytes_received(),
             splices: r(&self.stats.splices),
             failures: r(&self.stats.failures),
             in_flight: self.inflight.lock().len(),

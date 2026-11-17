@@ -1,5 +1,6 @@
 :root {
   --series-rate: #2a78d6;
+  --series-mesh: #eb6834;
   --series-cache: #1baf7a;
   --bg: #f4f6f4;
   --panel: #ffffff;
@@ -17,6 +18,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --series-rate: #3987e5;
+    --series-mesh: #d95926;
     --series-cache: #199e70;
     --bg: #111614;
     --panel: #18201c;
@@ -115,8 +117,19 @@ body.simple .side { display: none; }
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
   padding: 2px 8px; font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums;
 }
-#ch-rate .series { stroke: var(--series-rate); }
-#ch-rate .area, #ch-rate .dot { fill: var(--series-rate); }
+/* Download rate: imagery (categorical slot 1) and mesh (slot 2); the pair
+   passes the dataviz palette checks in both modes (CVD dE >= 24). */
+#ch-rate .series.s-imagery { stroke: var(--series-rate); }
+#ch-rate .series.s-mesh { stroke: var(--series-mesh); }
+#ch-rate .dot.s-imagery { fill: var(--series-rate); }
+#ch-rate .dot.s-mesh { fill: var(--series-mesh); }
+.chart-legend { display: flex; gap: 14px; margin: -2px 0 4px; font-size: 12px; color: var(--muted); }
+.chart-legend span::before {
+  content: ""; display: inline-block; width: 12px; height: 3px; border-radius: 2px;
+  margin-right: 6px; vertical-align: middle;
+}
+.chart-legend .s-imagery::before { background: var(--series-rate); }
+.chart-legend .s-mesh::before { background: var(--series-mesh); }
 #ch-cache .series { stroke: var(--series-cache); }
 #ch-cache .area, #ch-cache .dot { fill: var(--series-cache); }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }

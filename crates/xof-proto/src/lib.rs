@@ -208,6 +208,12 @@ pub struct HistorySample {
     pub t: f64,
     /// Bytes downloaded since the daemon started (imagery + meshes).
     pub download_bytes: u64,
+    /// The imagery part of `download_bytes`.
+    #[serde(default)]
+    pub imagery_bytes: u64,
+    /// The mesh part of `download_bytes` (counted as it streams in).
+    #[serde(default)]
+    pub mesh_bytes: u64,
     /// Imagery + mesh cache size on disk.
     pub cache_bytes: u64,
     /// Combined cache cap (imagery + mesh).

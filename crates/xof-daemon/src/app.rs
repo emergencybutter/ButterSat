@@ -45,7 +45,8 @@ pub struct App {
     history: Mutex<std::collections::VecDeque<HistorySample>>,
     /// Download bytes from engines/streamers replaced by a rebuild, so the
     /// cumulative counter never goes backwards.
-    download_base: Mutex<(u64, u64)>,
+    /// Per stream (imagery, mesh): (bytes counted by earlier engines/streamers, last reading).
+    download_base: Mutex<[(u64, u64); 2]>,
     stack: Mutex<Stack>,
     mount: Mutex<Option<xof_vfs::Mounted>>,
     mount_error: Mutex<Option<String>>,
@@ -173,7 +174,7 @@ impl App {
             storage_error: Mutex::new(storage_error),
             storage_job: Mutex::new(None),
             history: Mutex::new(std::collections::VecDeque::new()),
-            download_base: Mutex::new((0, 0)),
+            download_base: Mutex::new([(0, 0); 2]),
             stack: Mutex::new(stack),
             mount: Mutex::new(None),
             mount_error: Mutex::new(None),
@@ -461,29 +462,37 @@ impl App {
     }
 
     /// Total bytes downloaded (imagery + meshes), monotonic across rebuilds.
-    fn downloaded(&self) -> u64 {
-        let (img, mesh) = {
+    /// Monotonic (imagery, mesh) bytes downloaded since the daemon started.
+    fn downloaded(&self) -> (u64, u64) {
+        let now = {
             let st = self.stack.lock();
-            (st.engine.stats().fetch_bytes, st.mesh.as_ref().map(|m| m.status().download_bytes).unwrap_or(0))
+            [st.engine.stats().fetch_bytes, st.mesh.as_ref().map(|m| m.status().download_bytes).unwrap_or(0)]
         };
         let mut base = self.download_base.lock();
-        // A rebuilt engine/streamer starts from zero: keep what was counted.
-        if img + mesh < base.1 {
-            base.0 += base.1;
+        let mut out = [0u64; 2];
+        for i in 0..2 {
+            // A rebuilt engine/streamer starts from zero: keep what was counted.
+            if now[i] < base[i].1 {
+                base[i].0 += base[i].1;
+            }
+            base[i].1 = now[i];
+            out[i] = base[i].0 + base[i].1;
         }
-        base.1 = img + mesh;
-        base.0 + base.1
+        (out[0], out[1])
     }
 
     /// Record one activity sample (every 5 s; 2 h kept).
     pub fn sample_history(&self) {
         let c = self.cache_stats_light();
+        let (img, mesh) = self.downloaded();
         let s = HistorySample {
             t: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs_f64())
                 .unwrap_or(0.0),
-            download_bytes: self.downloaded(),
+            download_bytes: img + mesh,
+            imagery_bytes: img,
+            mesh_bytes: mesh,
             cache_bytes: c.0,
             cache_cap_bytes: c.1,
         };

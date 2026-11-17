@@ -189,12 +189,47 @@ async fn sim_busy(app: &AppHandle, conn: &Conn) -> bool {
 /// Download and install `update` (on Windows the process exits and the
 /// installer relaunches the app). Refuses while X-Plane is busy; stops the
 /// daemon so its files can be replaced.
+/// One install at a time: the background updater and the banner's button
+/// used to start two parallel downloads of the same installer.
+static INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 async fn install(app: &AppHandle, conn: &Conn, update: tauri_plugin_updater::Update) -> Result<Value, String> {
+    use std::sync::atomic::Ordering;
+    if INSTALLING.swap(true, Ordering::SeqCst) {
+        // Already downloading: the window follows it via update-progress.
+        return Ok(serde_json::json!({ "installed": false, "message": "already installing" }));
+    }
+    let r = install_once(app, conn, update).await;
+    // Reached only on failure (a successful install exits the process).
+    INSTALLING.store(false, Ordering::SeqCst);
+    r
+}
+
+async fn install_once(app: &AppHandle, conn: &Conn, update: tauri_plugin_updater::Update) -> Result<Value, String> {
     if sim_busy(app, conn).await {
         return Err(SIM_BUSY.into());
     }
     let _ = app.emit("update-installing", &update.version);
-    let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    // Progress for the banner (a slow download looked like a failure).
+    let (app2, version) = (app.clone(), update.version.clone());
+    let mut received: u64 = 0;
+    let mut last = std::time::Instant::now() - Duration::from_secs(1);
+    let bytes = update
+        .download(
+            move |chunk, total| {
+                received += chunk as u64;
+                if last.elapsed() >= Duration::from_millis(250) || Some(received) == total {
+                    last = std::time::Instant::now();
+                    let _ = app2.emit(
+                        "update-progress",
+                        serde_json::json!({ "version": version, "received": received, "total": total }),
+                    );
+                }
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| format!("download failed: {e}"))?;
     if sim_busy(app, conn).await {
         return Err(SIM_BUSY.into());
     }
