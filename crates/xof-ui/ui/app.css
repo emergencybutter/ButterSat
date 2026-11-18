@@ -229,3 +229,6 @@ input, select, textarea {
   color: var(--muted);
   text-align: center;
 }
+
+.row.between { justify-content: space-between; align-items: center; }
+.small { font-size: 13px; margin: 0 0 8px; }

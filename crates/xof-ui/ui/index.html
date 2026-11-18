@@ -219,7 +219,14 @@
     </section>
 
     <section id="logs" class="view">
-      <div class="card wide"><h3>Daemon log</h3><pre id="log" class="log"></pre></div>
+      <div class="card wide">
+        <div class="row between">
+          <h3>Daemon log</h3>
+          <div class="row"><span id="log-copied" class="result"></span><button type="button" id="btn-copy-log" class="primary">Copy log</button></div>
+        </div>
+        <p class="muted small">Asking for help on Discord? Copy the log and paste it into your message.</p>
+        <pre id="log" class="log"></pre>
+      </div>
     </section>
 
     <section id="about" class="view">

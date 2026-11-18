@@ -64,6 +64,7 @@ function show(view) {
   }
   if (view === "packs") loadPacks();
   if (view === "about") loadAbout();
+  if (view === "logs") loadLogHistory();
 }
 window.addEventListener("hashchange", () => show(location.hash.slice(1) || "overview"));
 
@@ -352,6 +353,45 @@ $("power").addEventListener("click", () => setPower(!poweredOn));
 $("btn-turn-on").addEventListener("click", () => setPower(true));
 
 // ---------------------------------------------------------------- logs
+// The Logs page starts with the recent history from the log file (lines from
+// before the window opened, even if the daemon has stopped), then follows
+// live events.
+let logHistoryLoaded = false;
+async function loadLogHistory() {
+  if (logHistoryLoaded) return;
+  try {
+    const text = await T.core.invoke("log_tail", { lines: 400 });
+    const pre = $("log");
+    const live = [...pre.children];
+    pre.replaceChildren();
+    for (const raw of text.split("\n")) {
+      const line = document.createElement("div");
+      const lvl = (raw.match(/\b(ERROR|WARN|INFO|DEBUG|TRACE)\b/) || [])[1];
+      line.className = lvl || "";
+      line.textContent = raw;
+      pre.appendChild(line);
+    }
+    for (const l of live) pre.appendChild(l);
+    pre.scrollTop = pre.scrollHeight;
+    logHistoryLoaded = true;
+  } catch (_) {}
+}
+
+$("btn-copy-log").addEventListener("click", async () => {
+  const out = $("log-copied");
+  out.className = "result";
+  try {
+    const text = await T.core.invoke("log_tail", { lines: 400 });
+    const a = await T.core.invoke("about");
+    const head = `ButterSat ${a.version} · ${navigator.userAgentData?.platform || navigator.platform} · ${new Date().toISOString()}`;
+    await navigator.clipboard.writeText(`${head}\n${text}\n`);
+    out.textContent = `Copied the last ${text.split("\n").length} lines`;
+  } catch (e) {
+    out.className = "result err";
+    out.textContent = `Could not copy: ${e}`;
+  }
+});
+
 function addLog(l) {
   const pre = $("log");
   const line = document.createElement("div");

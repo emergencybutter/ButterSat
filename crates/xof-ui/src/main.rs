@@ -107,6 +107,43 @@ async fn rpc(app: AppHandle, conn: State<'_, Conn>, method: String, params: Opti
     }
 }
 
+/// The last `lines` lines of the daemon log, read from disk (works even when
+/// the daemon is stopped or crashed): daemon.log, preceded by the rotated
+/// daemon.log.1 when the current file is short. For the Logs page and its
+/// "Copy log" button.
+#[tauri::command]
+fn log_tail(lines: Option<usize>) -> Result<String, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let n = lines.unwrap_or(400).clamp(1, 5000);
+    let dir = Dirs::standard().data.join("logs");
+    // Read at most the last 2 MB of each file: plenty for 5000 lines.
+    let tail = |name: &str| -> String {
+        let Ok(mut f) = std::fs::File::open(dir.join(name)) else { return String::new() };
+        let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+        let start = len.saturating_sub(2 << 20);
+        let _ = f.seek(SeekFrom::Start(start));
+        let mut buf = Vec::new();
+        let _ = f.read_to_end(&mut buf);
+        let mut s = String::from_utf8_lossy(&buf).into_owned();
+        if start > 0 {
+            // Drop the partial first line.
+            s = s.split_once('\n').map(|(_, rest)| rest.to_string()).unwrap_or_default();
+        }
+        s
+    };
+    let current = tail("daemon.log");
+    let mut all: Vec<String> = Vec::new();
+    if current.lines().count() < n {
+        all.extend(tail("daemon.log.1").lines().map(str::to_string));
+    }
+    all.extend(current.lines().map(str::to_string));
+    if all.is_empty() {
+        return Err(format!("no log found in {}", dir.display()));
+    }
+    let start = all.len().saturating_sub(n);
+    Ok(all[start..].join("\n"))
+}
+
 /// The On/Off switch state.
 #[tauri::command]
 fn power_state() -> Value {
@@ -354,6 +391,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            log_tail,
             rpc,
             power_state,
             power_on,
