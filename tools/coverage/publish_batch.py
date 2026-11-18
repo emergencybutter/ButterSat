@@ -33,7 +33,19 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 ROOT = r"D:\ButterSat-build"
-O4_TILES = os.path.join(ROOT, "Ortho4XP", "Tiles")
+# Tiles build on the SSD (Ortho4XP is a junction to E:); tiles built before
+# the move stay in Ortho4XP-D on the hard disk. A tile's folder is whichever
+# location holds its DSF.
+O4_TILE_ROOTS = [os.path.join(ROOT, "Ortho4XP", "Tiles"), os.path.join(ROOT, "Ortho4XP-D", "Tiles")]
+
+
+def tile_dir(t):
+    for root in O4_TILE_ROOTS:
+        d = os.path.join(root, f"zOrtho4XP_{t}")
+        end = os.path.join(d, "Earth nav data")
+        if os.path.isdir(end) and any(f.endswith(".dsf") for _, _, fs in os.walk(end) for f in fs):
+            return d
+    return os.path.join(O4_TILE_ROOTS[0], f"zOrtho4XP_{t}")
 STAGE = os.path.join(ROOT, "publish")
 XOF_PUBLISH = r"C:\Users\me\Desktop\Projects\xporthofs\target\release\xof-publish.exe"
 KEYS = r"C:\Users\me\Desktop\Projects\xporthofs-build\keys"
@@ -244,8 +256,8 @@ def main():
         for t, v in state.items()
         if v.get("status") == "done" and t not in published and in_box(t) and (allowed is None or t in allowed)
     )
-    dirs = [os.path.join(O4_TILES, f"zOrtho4XP_{t}") for t in new]
-    missing = [d for d in dirs if not os.path.isdir(d)]
+    dirs = [tile_dir(t) for t in new]
+    missing = [d for d in dirs if not os.path.isdir(os.path.join(d, "Earth nav data"))]
     if missing:
         sys.exit(f"missing tile folders: {missing[:5]}")
     us = sum(in_us(t) for t in new)
@@ -280,8 +292,7 @@ def prune(tiles):
     upload_and_verify succeeded (it exits on any failure)."""
     freed = 0
     for t in tiles:
-        lat, lon = int(t[:3]), int(t[3:])
-        d = os.path.join(O4_TILES, f"zOrtho4XP_{t}", "Earth nav data")
+        d = os.path.join(tile_dir(t), "Earth nav data")
         for root, _, files in os.walk(d):
             for f in files:
                 if f.endswith(".dsf"):
