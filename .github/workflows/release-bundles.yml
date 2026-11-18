@@ -1,0 +1,76 @@
+name: release bundles
+
+# macOS and Linux app bundles (the Windows installer is built and signed on
+# the release machine, see docs/release.md). Run by hand:
+#   gh workflow run release-bundles.yml --ref main
+# Updater signing stays off here (the updater key never leaves the release
+# machine), so these builds update by download for now.
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bundle:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: dmg
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: dmg
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bundle-${{ matrix.target }}
+
+      - name: Linux deps (WebKitGTK, AppImage tooling)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            patchelf file libfuse2 fuse3
+
+      - name: macOS deps (macFUSE headers for fuser)
+        if: runner.os == 'macOS'
+        run: brew install --cask macfuse
+
+      - name: Sidecars (daemon, CLI)
+        shell: bash
+        run: |
+          cargo build --release -p xof-daemon -p xof-cli --target ${{ matrix.target }}
+          mkdir -p crates/xof-ui/binaries
+          for b in xof-daemon xof-cli; do
+            cp "target/${{ matrix.target }}/release/$b" "crates/xof-ui/binaries/$b-${{ matrix.target }}"
+          done
+
+      - name: Bundle
+        working-directory: crates/xof-ui
+        run: >
+          npx --yes @tauri-apps/cli@2.12.4 build
+          --target ${{ matrix.target }}
+          --bundles ${{ matrix.bundles }}
+          --config tauri.unix.conf.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: buttersat-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            target/${{ matrix.target }}/release/bundle/deb/*.deb
+          if-no-files-found: error
