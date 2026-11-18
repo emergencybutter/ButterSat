@@ -12,6 +12,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # The release profile keeps debug info (handy for local crash dumps); on
+  # Linux it would stay inside the shipped binaries (107 MB .deb). Strip it.
+  CARGO_PROFILE_RELEASE_STRIP: debuginfo
 
 jobs:
   bundle:
