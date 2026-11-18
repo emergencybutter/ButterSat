@@ -50,6 +50,22 @@ class State:
         self.lock = threading.Lock()
         self.data = json.load(open(path)) if os.path.exists(path) else {}
 
+    def set_many(self, entries):
+        """Record several tiles in one read-modify-write (startup marks
+        thousands of empty squares; one write each took minutes)."""
+        if not entries:
+            return
+        with self.lock:
+            if os.path.exists(self.path):
+                self.data = json.load(open(self.path))
+            at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            for tile, kw in entries.items():
+                self.data[tile] = {**kw, "at": at}
+            tmp = self.path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(self.data, f, indent=1, sort_keys=True)
+            os.replace(tmp, self.path)
+
     def set(self, tile, **kw):
         with self.lock:
             # Re-read before writing: the file is also edited by hand and by
@@ -276,6 +292,7 @@ def main():
         if os.path.getsize(f) > 512
     }
     todo = []
+    marks = {}
     for lat in range(a.box[0], a.box[1] + 1):
         for lon in range(a.box[2], a.box[3] + 1):
             t = tile_name(lat, lon)
@@ -283,13 +300,14 @@ def main():
             if st in ("done", "skipped") or (st == "failed" and not a.retry_failed):
                 continue
             if t not in have_osm:
-                state.set(t, status="skipped", reason="no OSM data (ocean / outside extracts)")
+                marks[t] = {"status": "skipped", "reason": "no OSM data (ocean / outside extracts)"}
                 continue
             if os.path.exists(dsf_path(a.o4, lat, lon)):
-                state.set(t, status="done", reason="already built", seconds=0,
-                          dsf_bytes=os.path.getsize(dsf_path(a.o4, lat, lon)))
+                marks[t] = {"status": "done", "reason": "already built", "seconds": 0,
+                            "dsf_bytes": os.path.getsize(dsf_path(a.o4, lat, lon))}
                 continue
             todo.append((lat, lon))
+    state.set_many(marks)
     # Inland first is no better than any order; go north-east to south-west
     # so the region around the pilot tiles finishes first.
     todo.sort(key=lambda p: (-p[0], -p[1]))
