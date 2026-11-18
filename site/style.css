@@ -149,3 +149,7 @@ code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.9em; 
   .dl article + article { padding-left: 0; border-left: 0; }
 }
 .support code { overflow-wrap: anywhere; }
+.button.discord { display: inline-flex; align-items: center; gap: 8px; }
+.button .icon { width: 18px; height: 18px; flex: none; }
+.button.discord .icon { color: #5865f2; }
+.button.inline { padding: 4px 10px; font-size: 14px; vertical-align: baseline; }
