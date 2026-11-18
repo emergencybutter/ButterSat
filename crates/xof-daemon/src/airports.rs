@@ -86,13 +86,33 @@ pub fn find(xp: &Path, icao: &str) -> Option<Airport> {
     })
 }
 
+/// The user's latest SimBrief flight plan, as far as ButterSat needs it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SimbriefPlan {
+    /// `params.request_id`: changes with every generated plan.
+    pub id: String,
+    /// `params.time_generated` (unix seconds), 0 if absent.
+    pub generated: i64,
+    pub origin_icao: String,
+    pub origin: Option<(f64, f64)>,
+    pub destination_icao: String,
+    /// Origin, navlog fixes, destination.
+    pub points: Vec<(f64, f64)>,
+}
+
 /// Waypoints (lat, lon) of the user's latest SimBrief flight plan.
-///
-/// Complies with SimBrief's `xml.fetcher.php` guidelines:
-/// - Only called on explicit user action ("Prefetch SimBrief route"), never polled in a loop.
-/// - Identifies the client via `User-Agent` and the `client` query parameter.
-/// - Caches the latest response per user for 60 seconds to avoid redundant requests.
 pub async fn simbrief_route(user: &str) -> anyhow::Result<Vec<(f64, f64)>> {
+    Ok(simbrief_latest(user).await?.points)
+}
+
+/// The user's latest SimBrief plan (Navigraph `xml.fetcher.php`, JSON).
+///
+/// Load on SimBrief stays small (Navigraph developer terms §5.5: no undue
+/// burden on their APIs): identified via `User-Agent` and the `client`
+/// parameter; one response cached per user for 60 s; called on user action
+/// ("Prefetch SimBrief route") and by the departure watcher at most every
+/// 5 minutes, never while X-Plane is running.
+pub async fn simbrief_latest(user: &str) -> anyhow::Result<SimbriefPlan> {
     use parking_lot::Mutex;
     use std::collections::HashMap;
     use std::sync::OnceLock;
@@ -101,16 +121,16 @@ pub async fn simbrief_route(user: &str) -> anyhow::Result<Vec<(f64, f64)>> {
     const CLIENT_ID: &str = concat!("ButterSat/", env!("CARGO_PKG_VERSION"));
     const CACHE_TTL: Duration = Duration::from_secs(60);
 
-    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Vec<(f64, f64)>)>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, SimbriefPlan)>>> = OnceLock::new();
     static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
 
     let user = user.trim();
     anyhow::ensure!(!user.is_empty(), "SimBrief username or pilot ID is empty");
     let norm_user = user.to_ascii_lowercase();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some((ts, pts)) = cache.lock().get(&norm_user) {
+    if let Some((ts, plan)) = cache.lock().get(&norm_user) {
         if ts.elapsed() < CACHE_TTL {
-            return Ok(pts.clone());
+            return Ok(plan.clone());
         }
     }
 
@@ -132,9 +152,30 @@ pub async fn simbrief_route(user: &str) -> anyhow::Result<Vec<(f64, f64)>> {
         .error_for_status()?
         .json()
         .await?;
-    let pts = parse_simbrief(&v);
-    cache.lock().insert(norm_user, (Instant::now(), pts.clone()));
-    Ok(pts)
+    let plan = parse_plan(&v);
+    cache.lock().insert(norm_user, (Instant::now(), plan.clone()));
+    Ok(plan)
+}
+
+pub fn parse_plan(v: &serde_json::Value) -> SimbriefPlan {
+    let num = |x: &serde_json::Value| x.as_str().and_then(|s| s.parse::<f64>().ok()).or_else(|| x.as_f64());
+    let text = |x: &serde_json::Value| match x {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        _ => String::new(),
+    };
+    let origin = match (num(&v["origin"]["pos_lat"]), num(&v["origin"]["pos_long"])) {
+        (Some(a), Some(b)) => Some((a, b)),
+        _ => None,
+    };
+    SimbriefPlan {
+        id: text(&v["params"]["request_id"]),
+        generated: num(&v["params"]["time_generated"]).unwrap_or(0.0) as i64,
+        origin_icao: text(&v["origin"]["icao_code"]),
+        origin,
+        destination_icao: text(&v["destination"]["icao_code"]),
+        points: parse_simbrief(v),
+    }
 }
 
 pub fn parse_simbrief(v: &serde_json::Value) -> Vec<(f64, f64)> {
@@ -179,5 +220,22 @@ mod tests {
             "destination": {"pos_lat": "42.36", "pos_long": "-71.0"}
         });
         assert_eq!(parse_simbrief(&v).len(), 4);
+    }
+
+    #[test]
+    fn simbrief_plan_identity_and_origin() {
+        let v = serde_json::json!({
+            "params": {"request_id": "123456789", "time_generated": "1795010000"},
+            "origin": {"icao_code": "EGLL", "pos_lat": "51.4706", "pos_long": "-0.461941"},
+            "navlog": {"fix": {"pos_lat": "51.0", "pos_long": "-1.0"}},
+            "destination": {"icao_code": "KJFK", "pos_lat": "40.639", "pos_long": "-73.779"}
+        });
+        let p = parse_plan(&v);
+        assert_eq!(p.id, "123456789");
+        assert_eq!(p.generated, 1_795_010_000);
+        assert_eq!((p.origin_icao.as_str(), p.destination_icao.as_str()), ("EGLL", "KJFK"));
+        assert!((p.origin.unwrap().0 - 51.4706).abs() < 1e-9);
+        assert_eq!(p.points.len(), 3);
+        assert_eq!(parse_plan(&serde_json::json!({})).origin, None);
     }
 }

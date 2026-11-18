@@ -740,6 +740,57 @@ impl App {
         })
     }
 
+    /// Watch the configured SimBrief user's latest plan and warm the departure
+    /// area as soon as a new one is generated, before X-Plane is started.
+    /// Checks 30 s after start, then every 5 minutes; never while X-Plane is
+    /// connected (nothing left to prepare, and no load on SimBrief while
+    /// flying). Plans older than 12 hours are ignored; the last prepared plan
+    /// is remembered across restarts.
+    pub async fn simbrief_watch(self: Arc<Self>) {
+        const EVERY: Duration = Duration::from_secs(300);
+        const MAX_AGE_S: i64 = 12 * 3600;
+        let last_path = self.dirs.data.join("simbrief_last_plan.txt");
+        let mut last = std::fs::read_to_string(&last_path).unwrap_or_default().trim().to_string();
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        loop {
+            let cfg = self.config().simbrief;
+            let user = cfg.user.as_deref().map(str::trim).filter(|u| !u.is_empty()).map(str::to_string);
+            // Read the flag first: a watch guard must not live across the await.
+            let sim_running = *self.web.connected.borrow();
+            if let (true, Some(user), false) = (cfg.prepare_departure, user, sim_running) {
+                match airports::simbrief_latest(&user).await {
+                    Ok(plan) if !plan.id.is_empty() && plan.id != last => {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0);
+                        let fresh = plan.generated == 0 || now - plan.generated <= MAX_AGE_S;
+                        match (fresh, plan.origin) {
+                            (true, Some((lat, lon))) => {
+                                let (mesh, imagery) = self.prefetch.prepare(lat, lon);
+                                tracing::info!(
+                                    "new SimBrief plan {}→{}: preparing departure {} ({mesh} mesh tiles, {imagery} imagery tiles)",
+                                    plan.origin_icao,
+                                    plan.destination_icao,
+                                    plan.origin_icao
+                                );
+                            }
+                            (false, _) => {
+                                tracing::debug!("SimBrief plan {} is older than 12 h: not preparing", plan.id)
+                            }
+                            (_, None) => tracing::debug!("SimBrief plan {} has no origin position", plan.id),
+                        }
+                        last = plan.id;
+                        let _ = std::fs::write(&last_path, &last);
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::debug!("SimBrief check failed: {e:#}"),
+                }
+            }
+            tokio::time::sleep(EVERY).await;
+        }
+    }
+
     /// Switch off: persist it, unmount, disable our scenery_packs.ini entry,
     /// then exit.
     fn turn_off(&self) -> anyhow::Result<()> {

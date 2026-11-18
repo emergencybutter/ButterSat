@@ -189,11 +189,20 @@ pub struct PacksConfig {
     pub extra: Vec<PathBuf>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct SimbriefConfig {
     /// SimBrief username or pilot ID for route prefetch.
     pub user: Option<String>,
+    /// Watch for new SimBrief plans (every 5 min, not while X-Plane runs) and
+    /// warm the departure area as soon as one is generated.
+    pub prepare_departure: bool,
+}
+
+impl Default for SimbriefConfig {
+    fn default() -> Self {
+        Self { user: None, prepare_departure: true }
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
