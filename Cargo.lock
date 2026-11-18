@@ -6826,7 +6826,7 @@ checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
 name = "xof-bench"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -6844,7 +6844,7 @@ dependencies = [
 
 [[package]]
 name = "xof-cli"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -6859,7 +6859,7 @@ dependencies = [
 
 [[package]]
 name = "xof-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "bytes",
@@ -6881,7 +6881,7 @@ dependencies = [
 
 [[package]]
 name = "xof-daemon"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -6907,7 +6907,7 @@ dependencies = [
 
 [[package]]
 name = "xof-mesh"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6932,7 +6932,7 @@ dependencies = [
 
 [[package]]
 name = "xof-proto"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "dirs 5.0.1",
@@ -6948,7 +6948,7 @@ dependencies = [
 
 [[package]]
 name = "xof-publish"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6966,7 +6966,7 @@ dependencies = [
 
 [[package]]
 name = "xof-ui"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "serde",
@@ -6982,7 +6982,7 @@ dependencies = [
 
 [[package]]
 name = "xof-vfs"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "ed25519-dalek",

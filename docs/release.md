@@ -133,3 +133,28 @@ Because versioned installer artifacts in `/var/www/buttersat/updates/` are immut
 1. **Revert `latest.json`**: point `latest.json` back to the previous known-good version's `version`, `url`, and `signature`, and upload it to `/var/www/buttersat/updates/latest.json` on `selfhost`.
 2. **Purge or wait 5 minutes**: within 5 minutes (or immediately after purging `/updates/latest.json` in Cloudflare), clients checking for updates will see the previous release version.
 3. **Emergency takedown**: if no update should be served at all, replace `latest.json` with a version matching the oldest deployed client (`0.1.0`) so `tauri-plugin-updater` sees `remote_version <= current_version` and reports "Up to date".
+
+---
+
+## All platforms in one feed (Windows, macOS, Linux)
+
+macOS and Linux bundles are built by GitHub Actions; everything is signed on
+the release machine, where the updater key stays.
+
+1. Bump the version (`Cargo.toml`, `crates/xof-ui/tauri.conf.json`), commit, push.
+2. Build and sign the Windows installer locally (section 3).
+3. `gh workflow run release-bundles.yml --ref main` and wait for it to pass
+   (macOS arm64 and x86_64: `.dmg` + `.app.tar.gz`; Linux: `.AppImage` + `.deb`).
+4. `python tools/release/publish_release.py X.Y.Z` (dry run), then add `--go`:
+   downloads the CI artifacts, signs the macOS `.app.tar.gz` and the Linux
+   AppImage/`.deb` with `updater.key`, uploads all files, writes `latest.json`
+   with `windows-x86_64`, `darwin-aarch64`, `darwin-x86_64`,
+   `linux-x86_64-appimage` (also `linux-x86_64`) and `linux-x86_64-deb`, and
+   checks every public URL against the local SHA-256.
+5. Point the website's download links at the new version and deploy `site/`.
+
+Platform notes: on macOS and Linux the updater replaces the bundle in place and
+the app restarts itself into the new version (which starts the new daemon). A
+`.deb` update asks for the user's password (`pkexec dpkg -i`). AppImages run
+the daemon and CLI from copies in `~/.local/share/ButterSat/bin`, because the
+AppImage mount disappears when the window closes.

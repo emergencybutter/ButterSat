@@ -3,8 +3,9 @@ name: release bundles
 # macOS and Linux app bundles (the Windows installer is built and signed on
 # the release machine, see docs/release.md). Run by hand:
 #   gh workflow run release-bundles.yml --ref main
-# Updater signing stays off here (the updater key never leaves the release
-# machine), so these builds update by download for now.
+# Nothing is signed here: the updater key never leaves the release machine,
+# where tools/release/publish_release.py downloads these artifacts, signs the
+# update files and publishes all platforms to the update feed.
 
 on:
   workflow_dispatch:
@@ -21,10 +22,10 @@ jobs:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
           - os: macos-latest
             target: x86_64-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             bundles: appimage,deb
@@ -51,6 +52,10 @@ jobs:
 
       - name: Sidecars (daemon, CLI)
         shell: bash
+        env:
+          # macFUSE's library is universal; let pkg-config find it when
+          # cross-compiling the Intel build on an Apple silicon runner.
+          PKG_CONFIG_ALLOW_CROSS: "1"
         run: |
           cargo build --release -p xof-daemon -p xof-cli --target ${{ matrix.target }}
           mkdir -p crates/xof-ui/binaries
@@ -60,17 +65,30 @@ jobs:
 
       - name: Bundle
         working-directory: crates/xof-ui
+        env:
+          PKG_CONFIG_ALLOW_CROSS: "1"
         run: >
           npx --yes @tauri-apps/cli@2.12.4 build
           --target ${{ matrix.target }}
           --bundles ${{ matrix.bundles }}
           --config tauri.unix.conf.json
 
+      # The updater installs a .app.tar.gz on macOS (signed later, on the
+      # release machine, by tools/release/publish_release.py).
+      - name: macOS update archive
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd "target/${{ matrix.target }}/release/bundle/macos"
+          arch=$([ "${{ matrix.target }}" = aarch64-apple-darwin ] && echo aarch64 || echo x64)
+          tar -czf "../dmg/ButterSat_${arch}.app.tar.gz" ButterSat.app
+
       - uses: actions/upload-artifact@v4
         with:
           name: buttersat-${{ matrix.target }}
           path: |
             target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            target/${{ matrix.target }}/release/bundle/dmg/*.app.tar.gz
             target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
             target/${{ matrix.target }}/release/bundle/deb/*.deb
           if-no-files-found: error

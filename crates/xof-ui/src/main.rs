@@ -20,7 +20,40 @@ struct Conn(Mutex<Option<Client>>);
 
 /// This executable's folder, where the daemon binary ships.
 fn exe_dir() -> PathBuf {
-    std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from)).unwrap_or_else(|| PathBuf::from("."))
+    let dir =
+        std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from)).unwrap_or_else(|| PathBuf::from("."));
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("APPIMAGE").is_some() {
+        if let Some(staged) = stage_appimage_sidecars(&dir) {
+            return staged;
+        }
+    }
+    dir
+}
+
+/// An AppImage runs from a temporary mount that disappears when the window
+/// closes, but the daemon must outlive the window: run the daemon and CLI from
+/// copies in the data folder instead (refreshed when the AppImage changes).
+#[cfg(target_os = "linux")]
+fn stage_appimage_sidecars(from: &std::path::Path) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let to = Dirs::standard().data.join("bin");
+    std::fs::create_dir_all(&to).ok()?;
+    for name in ["xof-daemon", "xof-cli"] {
+        let (src, dst) = (from.join(name), to.join(name));
+        let same = match (std::fs::metadata(&src), std::fs::metadata(&dst)) {
+            (Ok(a), Ok(b)) => a.len() == b.len() && std::fs::read(&src).ok() == std::fs::read(&dst).ok(),
+            _ => false,
+        };
+        if !same {
+            // Copy then rename: replacing a running binary in place fails.
+            let tmp = to.join(format!(".{name}.new"));
+            std::fs::copy(&src, &tmp).ok()?;
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).ok()?;
+            std::fs::rename(&tmp, &dst).ok()?;
+        }
+    }
+    Some(to)
 }
 
 /// The persisted On/Off switch.
@@ -243,6 +276,11 @@ async fn install_once(app: &AppHandle, conn: &Conn, update: tauri_plugin_updater
         }
     }
     update.install(&bytes).map_err(|e| e.to_string())?;
+    // Windows: the installer took over and the process has exited. macOS and
+    // Linux: the bundle was replaced in place; restart into it (the new app
+    // starts the new daemon).
+    app.restart();
+    #[allow(unreachable_code)]
     Ok(serde_json::json!({ "installed": true, "version": update.version }))
 }
 
