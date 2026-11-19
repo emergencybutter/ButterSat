@@ -8,7 +8,11 @@ use xof_mesh::Coverage;
 
 /// Default mesh origins. The manifest's own `mirrors` list is used after the
 /// first successful fetch.
-pub const DEFAULT_MESH_MIRRORS: &[&str] = &["https://satsrv.butr.cc/v1"];
+pub const DEFAULT_MESH_MIRRORS: &[&str] = &["https://tiles.butr.cc/v1"];
+
+/// Former mirror (selfhost): now only redirects to `tiles.butr.cc`. Saved configs
+/// that still list it are rewritten on load.
+const RETIRED_MESH_MIRROR: &str = "https://satsrv.butr.cc/v1";
 
 /// Trusted manifest signing keys (ed25519, hex). Release builds embed the
 /// project key here; additional keys can be added in config.
@@ -261,9 +265,26 @@ impl Dirs {
 impl DaemonConfig {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         match std::fs::read_to_string(path) {
-            Ok(s) => Ok(toml::from_str(&s)?),
+            Ok(s) => {
+                let mut c: Self = toml::from_str(&s)?;
+                c.migrate();
+                Ok(c)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Rewrite settings saved by older versions.
+    fn migrate(&mut self) {
+        let m = &mut self.mesh.mirrors;
+        if m.iter().any(|x| x.trim_end_matches('/') == RETIRED_MESH_MIRROR) {
+            m.retain(|x| x.trim_end_matches('/') != RETIRED_MESH_MIRROR);
+            for d in DEFAULT_MESH_MIRRORS.iter().rev() {
+                if !m.iter().any(|x| x == d) {
+                    m.insert(0, d.to_string());
+                }
+            }
         }
     }
 
@@ -291,5 +312,30 @@ mod tests {
         let partial: DaemonConfig = toml::from_str("[imagery]\nprovider = \"bing\"\n").unwrap();
         assert_eq!(partial.imagery.provider, "bing");
         assert_eq!(partial.imagery.deadline_ms, 1200);
+    }
+
+    #[test]
+    fn retired_mirror_is_replaced_on_load() {
+        let dir = std::env::temp_dir().join(format!("xof-cfg-migrate-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("config.toml");
+        std::fs::write(
+            &p,
+            "[mesh]
+mirrors = [\"https://satsrv.butr.cc/v1/\", \"https://example.org/v1\"]
+",
+        )
+        .unwrap();
+        let c = DaemonConfig::load(&p).unwrap();
+        assert_eq!(c.mesh.mirrors, vec!["https://tiles.butr.cc/v1".to_string(), "https://example.org/v1".to_string()]);
+        std::fs::write(
+            &p,
+            "[mesh]
+mirrors = [\"https://example.org/v1\"]
+",
+        )
+        .unwrap();
+        assert_eq!(DaemonConfig::load(&p).unwrap().mesh.mirrors, vec!["https://example.org/v1".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
