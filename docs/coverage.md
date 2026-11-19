@@ -16,7 +16,7 @@ filter to Ortho4XP's tags → merge regions → dedupe (time-filter) → 1° til
 build_tiles.py ──▶ o4_build.py (Ortho4XP steps 1–3, 6 parallel, never adjacent)
         │                                                  Ortho4XP/Tiles/zOrtho4XP_*
         ▼ classify_tiles.py (publish only tiles whose OSM data is complete)
-publish_batch.py ──▶ xof-publish build (superset) ──▶ upload to selfhost ──▶ verify
+publish_batch.py ──▶ xof-publish build (superset) ──▶ upload to R2 ──▶ verify
 ```
 
 - **No Overpass server.** A full planet Overpass import is 100+ GB and days of
@@ -48,9 +48,10 @@ python tools/coverage/classify_tiles.py > complete.json
 python tools/coverage/publish_batch.py --only complete.json --go
 ```
 
-`overpass_lite.py` must be running (WSL) during step 3. The publisher refuses
-to leave selfhost with less than 20 GB free and uploads the signature, then the
-manifest, last, so clients never see a partial catalog.
+`overpass_lite.py` must be running (WSL) during step 3. The publisher uploads to
+Cloudflare R2 (`tiles.butr.cc`, credentials in `keys/r2.env`): objects first,
+then the signature, then the manifest, so clients never see a partial catalog.
+`--remirror` re-signs the manifest with the current mirror list.
 
 ## Rules that matter
 
@@ -86,5 +87,4 @@ other builds), and prints Triangle4XP's command for running it by hand.
 
 Same pipeline with other Geofabrik regions. Outside North America, replace
 the DEM (`custom_dem`) with Copernicus GLO-30 and check Ortho4XP's per-region
-defaults. Storage: CONUS is ~10 GB compressed on the mirror; the world would
-not fit selfhost's disk (see the hosting notes: R2 or a larger volume).
+defaults. Storage: CONUS is ~10 GB compressed; the whole catalog lives on R2.
