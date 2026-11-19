@@ -8,16 +8,14 @@
   <root>/published.json. The staging catalog (<root>/publish/v1) holds the
   previous release, so `xof-publish build` only compresses the new tiles and
   the manifest stays a superset.
-- Two mirrors share one signed manifest: Cloudflare R2 (tiles.butr.cc) holds
-  everything; selfhost (satsrv.butr.cc) holds the continental-US tiles as a second
-  mirror. The manifest lists R2 first; clients try mirrors in order and a 404
-  moves on to the next.
-- `--sync` uploads whatever either host lacks for the current staged catalog
-  (no build), e.g. after adding a host.
-- Upload: only objects each host lacks, objects first, then LICENSE,
-  ATTRIBUTION, the signature and the manifest last on both hosts (atomic
-  switch for clients).
-- Safety: refuses if selfhost would have < 20 GB free afterwards.
+- Host: Cloudflare R2 (tiles.butr.cc) holds the whole catalog and is the
+  manifest's only mirror. (selfhost / satsrv.butr.cc/v1 used to mirror the US;
+  it now redirects to R2 for old clients.)
+- `--sync` uploads whatever R2 lacks for the current staged catalog (no build).
+- `--remirror` re-signs the staged manifest under a new version with the
+  current mirror list (no new tiles) and publishes it.
+- Upload: only objects R2 lacks, objects first, then LICENSE, ATTRIBUTION,
+  the signature and the manifest last (atomic switch for clients).
 """
 
 import argparse
@@ -27,7 +25,6 @@ import os
 import random
 import subprocess
 import sys
-import tarfile
 import tempfile
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -53,12 +50,6 @@ KEY = os.path.join(KEYS, "release-signing.key")
 R2_ENV = os.path.join(KEYS, "r2.env")
 PUBKEY = "4d80119c5ec547ea0335d62a8ebbaf9a7831bb08849e4379ffdeda0b42757bfb"
 CFG = os.path.join(ROOT, "Ortho4XP", "Ortho4XP.cfg")
-SELFHOST_URL = "https://satsrv.butr.cc/v1"
-HOST = "user@update-server"
-REMOTE = "/var/www/buttersat/v1"
-MIN_FREE = 20 << 30
-# Tiles inside this box are served by selfhost; all others by R2.
-US_BOX = (24, 49, -125, -67)
 ATTRIBUTION = [
     "Mesh data © OpenStreetMap contributors (ODbL 1.0)",
     "Elevation: USGS 3DEP (public domain); Copernicus DEM GLO-30 © DLR e.V. 2010-2014 and "
@@ -71,8 +62,6 @@ IMMUTABLE = "public, max-age=31536000, immutable"
 R2_WORKERS = 16
 
 
-def ssh(cmd, **kw):
-    return subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, cmd], check=True, capture_output=True, text=True, **kw).stdout
 
 
 def r2_env():
@@ -97,11 +86,6 @@ def r2_url(env):
     return env["R2_PUBLIC_URL"].rstrip("/") + "/v1"
 
 
-def in_us(tile):
-    lat, lon = int(tile[:3]), int(tile[3:])
-    return US_BOX[0] <= lat <= US_BOX[1] and US_BOX[2] <= lon <= US_BOX[3]
-
-
 def local_files():
     v1 = os.path.join(STAGE, "v1")
     out = {}
@@ -119,46 +103,14 @@ def staged_manifest():
         return json.loads(zstandard.ZstdDecompressor().stream_reader(f).read())
 
 
-def objects_by_host(manifest):
-    """{"selfhost": {rel: (size, blake3)}, "r2": {...}}: R2 gets every object,
-    selfhost the continental-US ones."""
-    hosts = {"selfhost": {}, "r2": {}}
-    for tile, e in manifest["tiles"].items():
-        objs = {e["dsf"]["object"]: (e["dsf"]["size"], e["dsf"]["blake3"])}
+def catalog_objects(manifest):
+    """{rel: (size, blake3)} of every tile object in the manifest."""
+    objs = {}
+    for e in manifest["tiles"].values():
+        objs[e["dsf"]["object"]] = (e["dsf"]["size"], e["dsf"]["blake3"])
         for m in e.get("masks", []):
             objs[m["object"]] = (m["size"], m["blake3"])
-        hosts["r2"].update(objs)
-        if in_us(tile):
-            hosts["selfhost"].update(objs)
-    return hosts
-
-
-def selfhost_have():
-    have = {}
-    for line in ssh(f"cd {REMOTE} && find . -type f -printf '%P %s\\n'").splitlines():
-        rel, size = line.rsplit(" ", 1)
-        have[rel] = int(size)
-    return have
-
-
-def selfhost_upload(rels):
-    if not rels:
-        return
-    v1 = os.path.join(STAGE, "v1")
-    with tempfile.NamedTemporaryFile(suffix=".tar", delete=False) as tmp:
-        with tarfile.open(fileobj=tmp, mode="w") as tar:
-            for r in rels:
-                tar.add(os.path.join(v1, r), arcname=r)
-        name = tmp.name
-    try:
-        with open(name, "rb") as f:
-            subprocess.run(
-                ["ssh", "-o", "BatchMode=yes", HOST,
-                 f"tar -C {REMOTE} -xf - && chown -R root:root {REMOTE} && chmod -R a+rX {REMOTE}"],
-                stdin=f, check=True,
-            )
-    finally:
-        os.remove(name)
+    return objs
 
 
 def r2_have(s3, bucket):
@@ -233,12 +185,16 @@ def main():
                     help="parallel R2 uploads; fewer leaves upstream room for other traffic "
                          "(a saturated upstream also slows every download on the link)")
     ap.add_argument("--sync", action="store_true",
-                    help="no build: upload what either host lacks for the current staged catalog")
+                    help="no build: upload what R2 lacks for the current staged catalog")
+    ap.add_argument("--remirror", action="store_true",
+                    help="no new tiles: re-sign the staged manifest with the current mirror list and publish it")
     a = ap.parse_args()
     global R2_WORKERS
     R2_WORKERS = a.r2_workers
     if a.sync:
         return sync(a.go)
+    if a.remirror:
+        return remirror(a.go)
 
     state = json.load(open(os.path.join(ROOT, "state.json")))
     pub_path = os.path.join(ROOT, "published.json")
@@ -260,19 +216,18 @@ def main():
     missing = [d for d in dirs if not os.path.isdir(os.path.join(d, "Earth nav data"))]
     if missing:
         sys.exit(f"missing tile folders: {missing[:5]}")
-    us = sum(in_us(t) for t in new)
-    print(f"{len(new)} new tiles to publish (all to R2, {us} of them also to selfhost; {len(published)} already published)")
+    print(f"{len(new)} new tiles to publish ({len(published)} already published)")
     if not new or not a.go:
         return
 
     env = r2_env()
-    version = datetime.datetime.now(datetime.timezone.utc).strftime("%Y.%m.%d.%H%M")
+    version = new_version()
     # Windows caps a command line at 32,767 characters (~600 tile paths):
     # build in batches; each one adds to the staged catalog (superset).
     print("building catalog", version)
     for i in range(0, len(dirs), 300):
         cmd = [XOF_PUBLISH, "build", "--tiles", *dirs[i:i + 300], "--out", STAGE, "--key", KEY, "--version",
-               version, "--mirror", r2_url(env), "--mirror", SELFHOST_URL, "--build-config", CFG, "--strip-rasters"]
+               version, *mirror_args(env), "--build-config", CFG, "--strip-rasters"]
         for line in ATTRIBUTION:
             cmd += ["--attribution", line]
         subprocess.run(cmd, check=True)
@@ -285,6 +240,37 @@ def main():
     print(f"published {version}: {len(published)} built tiles in total (plus the pilot)")
     if a.prune:
         prune(new)
+
+
+def new_version():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y.%m.%d.%H%M")
+
+
+def mirror_args(env):
+    return ["--mirror", r2_url(env)]
+
+
+def remirror(go):
+    """New manifest version, same tiles, current mirror list."""
+    env = r2_env()
+    before = staged_manifest()
+    print(f"staged {before['catalog_version']}: mirrors {before.get('mirrors')} -> {[r2_url(env)]}")
+    if not go:
+        return
+    version = new_version()
+    with tempfile.TemporaryDirectory() as empty:
+        # A tile folder with no DSFs: xof-publish rewrites the manifest only.
+        os.makedirs(os.path.join(empty, "Earth nav data"))
+        cmd = [XOF_PUBLISH, "build", "--tiles", empty, "--out", STAGE, "--key", KEY, "--version", version,
+               *mirror_args(env), "--build-config", CFG, "--strip-rasters"]
+        for line in ATTRIBUTION:
+            cmd += ["--attribution", line]
+        subprocess.run(cmd, check=True)
+    after = staged_manifest()
+    if set(after["tiles"]) != set(before["tiles"]):
+        sys.exit("refusing: the tile set changed while re-signing")
+    upload_and_verify()
+    print(f"published {version} with mirrors {after['mirrors']}")
 
 
 def prune(tiles):
@@ -304,8 +290,7 @@ def prune(tiles):
 
 def sync(go):
     manifest = staged_manifest()
-    hosts = objects_by_host(manifest)
-    print(f"staged catalog: {len(hosts['r2'])} objects (R2), {len(hosts['selfhost'])} (selfhost)")
+    print(f"staged catalog: {len(catalog_objects(manifest))} objects")
     upload_and_verify(dry_run=not go)
     if go:
         # Everything in the verified staged catalog is live now (e.g. resuming
@@ -331,38 +316,24 @@ def upload_and_verify(dry_run=False):
     env = r2_env()
     s3, bucket = r2_client(env), env["R2_BUCKET"]
     local = local_files()
-    hosts = objects_by_host(staged_manifest())
-
-    have = selfhost_have()
-    to_selfhost = [r for r in hosts["selfhost"] if have.get(r) != local[r]]
-    need = sum(local[r] for r in to_selfhost)
-    free = int(ssh("df -B1 --output=avail / | tail -1").strip())
-    print(f"selfhost: upload {len(to_selfhost)} objects, {need / 1e6:.0f} MB; server free {free / 1e9:.1f} GB")
-    if free - need < MIN_FREE:
-        sys.exit("refusing: selfhost would drop below 20 GB free")
+    objs = catalog_objects(staged_manifest())
 
     r2have = r2_have(s3, bucket)
-    to_r2 = [r for r in hosts["r2"] if r2have.get(r) != local[r]]
+    to_r2 = [r for r in objs if r2have.get(r) != local[r]]
     print(f"R2: upload {len(to_r2)} objects, {sum(local[r] for r in to_r2) / 1e9:.1f} GB "
           f"(bucket holds {len(r2have)} objects)")
     if dry_run:
         return
 
-    selfhost_upload(to_selfhost)
     r2_upload(s3, bucket, to_r2, IMMUTABLE, workers=R2_WORKERS)
-    # Signature before manifest on each host: a client never sees a manifest
-    # without its signature.
+    # Signature before manifest: a client never sees a manifest without its
+    # signature.
     for rel in LAST:
         r2_upload(s3, bucket, [rel], "no-cache", workers=1)
-        selfhost_upload([rel])
 
     print("verifying")
-    for base in (r2_url(env), SELFHOST_URL):
-        subprocess.run([XOF_PUBLISH, "verify", "--origin", base, "--pubkey", PUBKEY, "--sample", "0"], check=True)
-    check_objects(SELFHOST_URL, hosts["selfhost"])
-    check_objects(r2_url(env), hosts["r2"])
-    us_r2 = {r: v for r, v in hosts["r2"].items() if r in hosts["selfhost"]}
-    check_objects(r2_url(env), us_r2)
+    subprocess.run([XOF_PUBLISH, "verify", "--origin", r2_url(env), "--pubkey", PUBKEY, "--sample", "0"], check=True)
+    check_objects(r2_url(env), objs)
 
 
 if __name__ == "__main__":
