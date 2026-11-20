@@ -14,6 +14,8 @@
 - `--sync` uploads whatever R2 lacks for the current staged catalog (no build).
 - `--remirror` re-signs the staged manifest under a new version with the
   current mirror list (no new tiles) and publishes it.
+- Staging (<root>/publish/v1) only needs the manifest and objects not yet on
+  R2: `--drop-staged` deletes staged objects R2 already holds (same size).
 - Upload: only objects R2 lacks, objects first, then LICENSE, ATTRIBUTION,
   the signature and the manifest last (atomic switch for clients).
 """
@@ -188,6 +190,8 @@ def main():
                     help="no build: upload what R2 lacks for the current staged catalog")
     ap.add_argument("--remirror", action="store_true",
                     help="no new tiles: re-sign the staged manifest with the current mirror list and publish it")
+    ap.add_argument("--drop-staged", action="store_true",
+                    help="delete staged objects that R2 already holds (frees the local copy of the catalog)")
     a = ap.parse_args()
     global R2_WORKERS
     R2_WORKERS = a.r2_workers
@@ -195,6 +199,8 @@ def main():
         return sync(a.go)
     if a.remirror:
         return remirror(a.go)
+    if a.drop_staged:
+        return drop_staged(a.go)
 
     state = json.load(open(os.path.join(ROOT, "state.json")))
     pub_path = os.path.join(ROOT, "published.json")
@@ -273,6 +279,20 @@ def remirror(go):
     print(f"published {version} with mirrors {after['mirrors']}")
 
 
+def drop_staged(go):
+    env = r2_env()
+    r2have = r2_have(r2_client(env), env["R2_BUCKET"])
+    local = local_files()
+    drop = [r for r, size in local.items() if r not in LAST and r2have.get(r) == size]
+    print(f"{len(drop)} of {len(local)} staged files are on R2 ({sum(local[r] for r in drop) / 1e9:.1f} GB)")
+    if not go:
+        return
+    v1 = os.path.join(STAGE, "v1")
+    for r in drop:
+        os.remove(os.path.join(v1, r))
+    print("deleted")
+
+
 def prune(tiles):
     """Delete the raw DSFs of verified-live tiles. Only called after
     upload_and_verify succeeded (it exits on any failure)."""
@@ -319,7 +339,12 @@ def upload_and_verify(dry_run=False):
     objs = catalog_objects(staged_manifest())
 
     r2have = r2_have(s3, bucket)
-    to_r2 = [r for r in objs if r2have.get(r) != local[r]]
+    # The staging catalog keeps only what is not yet on R2 (published objects
+    # are deleted locally); every object must be on R2 or staged here.
+    lost = [r for r in objs if r not in local and r2have.get(r) != objs[r][0]]
+    if lost:
+        sys.exit(f"refusing: {len(lost)} catalog objects are neither on R2 nor staged, e.g. {lost[:3]}")
+    to_r2 = [r for r in objs if r in local and r2have.get(r) != local[r]]
     print(f"R2: upload {len(to_r2)} objects, {sum(local[r] for r in to_r2) / 1e9:.1f} GB "
           f"(bucket holds {len(r2have)} objects)")
     if dry_run:
