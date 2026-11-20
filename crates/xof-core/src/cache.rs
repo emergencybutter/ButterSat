@@ -80,12 +80,34 @@ pub struct TileStore {
     path: Mutex<PathBuf>,
     /// Pending last-access updates, flushed in batches.
     touched: Mutex<HashMap<[u8; 10], u64>>,
+    /// Tiles written but not yet committed (key -> stored value), and the
+    /// batch being committed right now. Reads look here first.
+    pending: Mutex<Batch>,
+    in_flight: Mutex<HashMap<[u8; 19], Arc<Vec<u8>>>>,
+    /// Serialises flushes (one batch commit at a time, in order).
+    flushing: Mutex<()>,
     /// A background repair is running (see [`TileStore::open_or_repair`]).
     repairing: AtomicBool,
     /// Bumped by `close`/`reopen`: a background repair that finishes after
     /// either is discarded.
     generation: AtomicU64,
 }
+
+#[derive(Default)]
+struct Batch {
+    tiles: HashMap<[u8; 19], Arc<Vec<u8>>>,
+    bytes: usize,
+}
+
+/// Writes are batched and committed by a background thread at this interval
+/// (or sooner when the batch reaches `BATCH_BYTES`). Every commit saves
+/// redb's allocator state ("quick-repair"), so a crash or a kill at reboot
+/// costs at most the last batch instead of a full repair on the next start:
+/// minutes on a large cache. One commit per batch is also much cheaper than
+/// one per tile (measured on 12 GB: ~0.3 ms per tile in batches of 100
+/// against 1.5-4 ms per single-tile commit, 17-29 ms with quick-repair).
+const BATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+const BATCH_BYTES: usize = 32 << 20;
 
 /// What to do when the file was not closed cleanly (crash, power loss,
 /// killed at reboot): redb then has to scan the whole file before use, which
@@ -136,13 +158,25 @@ impl TileStore {
     }
 
     fn with(db: Option<Database>, path: &Path) -> Arc<Self> {
-        Arc::new(Self {
+        let s = Arc::new(Self {
             db: RwLock::new(db),
             path: Mutex::new(path.to_path_buf()),
             touched: Mutex::new(HashMap::new()),
+            pending: Mutex::new(Batch::default()),
+            in_flight: Mutex::new(HashMap::new()),
+            flushing: Mutex::new(()),
             repairing: AtomicBool::new(false),
             generation: AtomicU64::new(0),
-        })
+        });
+        let weak = Arc::downgrade(&s);
+        let _ = std::thread::Builder::new().name("cache-flush".into()).spawn(move || loop {
+            std::thread::sleep(BATCH_INTERVAL);
+            let Some(s) = weak.upgrade() else { break };
+            if let Err(e) = s.flush() {
+                tracing::debug!("imagery cache flush: {e:#}");
+            }
+        });
+        s
     }
 
     /// Open without waiting for a repair: if the file was not closed cleanly,
@@ -194,7 +228,7 @@ impl TileStore {
     /// Flush and close the database (to move or delete its file). Waits for
     /// in-flight operations.
     pub fn close(&self) -> anyhow::Result<()> {
-        let _ = self.flush_access();
+        let _ = self.flush();
         let mut g = self.db.write();
         self.generation.fetch_add(1, Ordering::SeqCst);
         g.take();
@@ -223,24 +257,38 @@ impl TileStore {
 
     pub fn get(&self, provider: &str, t: TileCoord) -> anyhow::Result<Option<Fetched>> {
         let p = provider_byte(provider);
-        let tx = self.db()?.begin_read()?;
-        let table = tx.open_table(TILES)?;
-        let Some(v) = table.get(&tile_key(p, t)[..])? else {
-            return Ok(None);
+        let key = tile_key(p, t);
+        let staged = self.pending.lock().tiles.get(&key).cloned().or_else(|| self.in_flight.lock().get(&key).cloned());
+        let decode = |v: &[u8]| {
+            if v.len() < 9 {
+                return None;
+            }
+            let stored = u64::from_be_bytes(v[1..9].try_into().unwrap());
+            match v[0] {
+                0 => Some(Fetched::Data(Bytes::copy_from_slice(&v[9..]))),
+                _ if now().saturating_sub(stored) < NEGATIVE_TTL => Some(Fetched::NoData),
+                _ => None,
+            }
         };
-        let v = v.value();
-        if v.len() < 9 {
-            return Ok(None);
+        let found = match staged {
+            Some(v) => decode(&v),
+            None => {
+                let tx = self.db()?.begin_read()?;
+                let table = tx.open_table(TILES)?;
+                let Some(v) = table.get(&key[..])? else {
+                    return Ok(None);
+                };
+                decode(v.value())
+            }
+        };
+        if found.is_some() {
+            self.touched.lock().insert(area_key(p, area_of(t)), now());
         }
-        let stored = u64::from_be_bytes(v[1..9].try_into().unwrap());
-        self.touched.lock().insert(area_key(p, area_of(t)), now());
-        Ok(match v[0] {
-            0 => Some(Fetched::Data(Bytes::copy_from_slice(&v[9..]))),
-            _ if now().saturating_sub(stored) < NEGATIVE_TTL => Some(Fetched::NoData),
-            _ => None,
-        })
+        Ok(found)
     }
 
+    /// Store a tile. Buffered: committed by the flush thread within
+    /// `BATCH_INTERVAL` (readable at once through `get`).
     pub fn put(&self, provider: &str, t: TileCoord, f: &Fetched) -> anyhow::Result<()> {
         if self.is_repairing() && self.db.read().is_none() {
             // Not cached this time; the tile is downloaded again if needed.
@@ -260,43 +308,87 @@ impl TileStore {
                 val.extend_from_slice(&ts.to_be_bytes());
             }
         }
-        let mut tx = self.db()?.begin_write()?;
-        tx.set_durability(Durability::Eventual);
-        {
-            let mut tiles = tx.open_table(TILES)?;
-            let key = tile_key(p, t);
-            let old = tiles.insert(&key[..], &val[..])?.map(|o| o.value().len() as u64).unwrap_or(0);
-            let mut areas = tx.open_table(AREAS)?;
-            let ak = area_key(p, area_of(t));
-            let (_, bytes) = areas.get(&ak[..])?.map(|v| v.value()).unwrap_or((0, 0));
-            areas.insert(&ak[..], (ts, bytes.saturating_sub(old) + val.len() as u64))?;
+        let full = {
+            let mut b = self.pending.lock();
+            b.bytes += val.len();
+            if let Some(old) = b.tiles.insert(tile_key(p, t), Arc::new(val)) {
+                b.bytes -= old.len();
+            }
+            b.bytes >= BATCH_BYTES
+        };
+        if full {
+            // Back-pressure: the writer commits instead of buffering more.
+            self.flush()?;
         }
+        Ok(())
+    }
+
+    /// Commit buffered tiles and access times in one transaction (with
+    /// quick-repair, see `BATCH_INTERVAL`).
+    pub fn flush(&self) -> anyhow::Result<()> {
+        let _one = self.flushing.lock();
+        let touched = std::mem::take(&mut *self.touched.lock());
+        {
+            // Hand over under the `pending` lock (same order as `get`), so a
+            // tile is always visible in one of the two maps until committed.
+            let mut pending = self.pending.lock();
+            if pending.tiles.is_empty() && touched.is_empty() {
+                return Ok(());
+            }
+            *self.in_flight.lock() = std::mem::take(&mut *pending).tiles;
+        }
+        let res = (|| -> anyhow::Result<()> {
+            let in_flight = self.in_flight.lock().clone();
+            let mut tx = self.db()?.begin_write()?;
+            tx.set_durability(Durability::Eventual);
+            tx.set_quick_repair(true);
+            {
+                let mut tiles = tx.open_table(TILES)?;
+                let mut areas = tx.open_table(AREAS)?;
+                let ts = now();
+                for (key, val) in &in_flight {
+                    let old = tiles.insert(&key[..], &val[..])?.map(|o| o.value().len() as u64).unwrap_or(0);
+                    let ak = &key[..10];
+                    let (_, bytes) = areas.get(ak)?.map(|v| v.value()).unwrap_or((0, 0));
+                    areas.insert(ak, (ts, bytes.saturating_sub(old) + val.len() as u64))?;
+                }
+                for (k, ts) in touched {
+                    let cur = areas.get(&k[..])?.map(|v| v.value());
+                    if let Some((last, bytes)) = cur {
+                        areas.insert(&k[..], (last.max(ts), bytes))?;
+                    }
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })();
+        // On failure the batch is dropped: those tiles are downloaded again
+        // when needed.
+        self.in_flight.lock().clear();
+        res
+    }
+
+    /// Make everything written so far durable: flush, then one fsynced
+    /// commit (also with quick-repair). Called every minute by the daemon;
+    /// in between, a power loss can lose the batches since the last
+    /// checkpoint but never needs a full repair.
+    pub fn checkpoint(&self) -> anyhow::Result<()> {
+        self.flush()?;
+        let _one = self.flushing.lock();
+        let mut tx = self.db()?.begin_write()?;
+        tx.set_durability(Durability::Immediate);
+        tx.set_quick_repair(true);
         tx.commit()?;
         Ok(())
     }
 
-    /// Persist pending last-access timestamps.
+    /// Persist pending last-access timestamps (and buffered tiles).
     pub fn flush_access(&self) -> anyhow::Result<()> {
-        let pending = std::mem::take(&mut *self.touched.lock());
-        if pending.is_empty() {
-            return Ok(());
-        }
-        let mut tx = self.db()?.begin_write()?;
-        tx.set_durability(Durability::Eventual);
-        {
-            let mut areas = tx.open_table(AREAS)?;
-            for (k, ts) in pending {
-                let cur = areas.get(&k[..])?.map(|v| v.value());
-                if let Some((last, bytes)) = cur {
-                    areas.insert(&k[..], (last.max(ts), bytes))?;
-                }
-            }
-        }
-        tx.commit()?;
-        Ok(())
+        self.flush()
     }
 
     pub fn total_bytes(&self) -> anyhow::Result<u64> {
+        self.flush()?;
         let tx = self.db()?.begin_read()?;
         let areas = tx.open_table(AREAS)?;
         let mut sum = 0;
@@ -307,6 +399,7 @@ impl TileStore {
     }
 
     pub fn areas(&self) -> anyhow::Result<Vec<AreaInfo>> {
+        self.flush()?;
         let tx = self.db()?.begin_read()?;
         let areas = tx.open_table(AREAS)?;
         let mut out = Vec::new();
@@ -331,8 +424,11 @@ impl TileStore {
     /// Delete one area (all providers' tiles under that area key).
     pub fn evict_area(&self, provider_byte: u8, area: TileCoord) -> anyhow::Result<u64> {
         let ak = area_key(provider_byte, area);
+        self.flush()?;
+        let _one = self.flushing.lock();
         let mut tx = self.db()?.begin_write()?;
         tx.set_durability(Durability::Eventual);
+        tx.set_quick_repair(true);
         let freed;
         {
             let mut tiles = tx.open_table(TILES)?;
@@ -376,6 +472,7 @@ impl TileStore {
     }
 
     pub fn tile_count(&self) -> anyhow::Result<u64> {
+        self.flush()?;
         let tx = self.db()?.begin_read()?;
         Ok(tx.open_table(TILES)?.len()?)
     }
@@ -460,13 +557,35 @@ mod tests {
         assert!(matches!(s.get("esri", t).unwrap(), Some(Fetched::Data(d)) if &d[..] == b"jpeg"));
     }
 
-    /// Helper for the test below (does nothing unless run by it).
+    /// Run the crash helper below in a child process: it writes to `db` and
+    /// exits without closing it, like a daemon killed at reboot.
+    fn crash(db: &Path, checkpoint: bool) {
+        let st = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "cache::tests::crash_helper", "--nocapture", "--test-threads=1"])
+            .env("XOF_CRASH_HELPER_DB", db)
+            .env("XOF_CRASH_HELPER_CHECKPOINT", if checkpoint { "1" } else { "0" })
+            .status()
+            .unwrap();
+        assert!(st.success());
+    }
+
+    /// Helper for the tests below (does nothing unless run by them). Without
+    /// a checkpoint: one durable commit (full repair needed). With one: a
+    /// checkpoint, then a normal (not fsynced) put after it.
     #[test]
     fn crash_helper() {
         let Some(path) = std::env::var_os("XOF_CRASH_HELPER_DB") else { return };
         let s = TileStore::open(Path::new(&path)).unwrap();
         s.put("esri", TileCoord::new(16, 100, 200), &Fetched::Data(Bytes::from_static(b"jpeg"))).unwrap();
-        {
+        if std::env::var("XOF_CRASH_HELPER_CHECKPOINT").as_deref() == Ok("1") {
+            s.checkpoint().unwrap();
+            s.put("esri", TileCoord::new(16, 7, 7), &Fetched::Data(Bytes::from_static(b"late"))).unwrap();
+            s.flush().unwrap();
+            // ...and one still buffered when the process dies.
+            s.put("esri", TileCoord::new(16, 9, 9), &Fetched::Data(Bytes::from_static(b"lost"))).unwrap();
+        } else {
+            // A durable commit without quick-repair: a full repair is needed.
+            s.flush().unwrap();
             let db = s.db().unwrap();
             let mut tx = db.begin_write().unwrap();
             tx.set_durability(Durability::Immediate);
@@ -477,18 +596,29 @@ mod tests {
     }
 
     #[test]
+    fn checkpoint_makes_crash_recovery_instant() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("crashed.redb");
+        crash(&db, true);
+        // Opens without a full repair...
+        let d = create_db_with(&db, Repair::Refuse).expect("no full repair after a checkpoint");
+        drop(d);
+        let s = TileStore::open_or_repair(&db).unwrap();
+        assert!(!s.is_repairing());
+        // ...with everything up to the checkpoint, and consistent.
+        let t = TileCoord::new(16, 100, 200);
+        assert!(matches!(s.get("esri", t).unwrap(), Some(Fetched::Data(d)) if &d[..] == b"jpeg"));
+        s.put("esri", TileCoord::new(16, 8, 8), &Fetched::NoData).unwrap();
+        s.checkpoint().unwrap();
+        assert!(s.tile_count().unwrap() >= 2);
+    }
+
+    #[test]
     fn unclean_file_opens_at_once_and_repairs_in_background() {
         let dir = tempfile::tempdir().unwrap();
         let copy = dir.path().join("crashed.redb");
         let t = TileCoord::new(16, 100, 200);
-        // A child process writes a tile and exits without closing the
-        // database, like a daemon killed at reboot.
-        let st = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "cache::tests::crash_helper", "--nocapture", "--test-threads=1"])
-            .env("XOF_CRASH_HELPER_DB", &copy)
-            .status()
-            .unwrap();
-        assert!(st.success());
+        crash(&copy, false);
         assert!(
             matches!(
                 create_db_with(&copy, Repair::Refuse).map(|_| ()).map_err(|e| e.downcast::<redb::DatabaseError>()),

@@ -175,6 +175,15 @@ async fn run(app: Arc<App>, auto_mount: bool) -> anyhow::Result<()> {
         _ = tokio::signal::ctrl_c() => tracing::info!("interrupted"),
     }
     let a = app.clone();
-    tokio::task::spawn_blocking(move || a.unmount()).await?;
+    tokio::task::spawn_blocking(move || {
+        a.unmount();
+        // Close the imagery cache explicitly: the process may exit before
+        // every task holding the App is dropped, and a database left open
+        // counts as an unclean shutdown.
+        if let Err(e) = a.store.close() {
+            tracing::warn!("closing the imagery cache: {e:#}");
+        }
+    })
+    .await?;
     Ok(())
 }

@@ -37,7 +37,7 @@ pub struct App {
     pub dirs: Dirs,
     config_path: PathBuf,
     cfg: Mutex<DaemonConfig>,
-    store: Arc<TileStore>,
+    pub(crate) store: Arc<TileStore>,
     /// Cache folder in use (configured, or the default as a fallback).
     cache_root: Mutex<PathBuf>,
     storage_error: Mutex<Option<String>>,
@@ -592,7 +592,16 @@ impl App {
             let this = self.clone();
             let _ = tokio::task::spawn_blocking(move || {
                 let cfg = this.cfg.lock().clone();
-                let _ = this.store.flush_access();
+                // Durable, quick-repair commit: after a crash or a kill at
+                // reboot the cache reopens at once (TileStore::checkpoint).
+                let t0 = std::time::Instant::now();
+                match this.store.checkpoint() {
+                    Ok(()) if t0.elapsed() > Duration::from_secs(2) => {
+                        tracing::warn!("imagery cache checkpoint took {:.1} s", t0.elapsed().as_secs_f64())
+                    }
+                    Ok(()) => {}
+                    Err(e) => tracing::debug!("imagery cache checkpoint: {e:#}"),
+                }
                 if n % 5 == 1 {
                     if let Ok(freed) = this.store.evict_to(cfg.imagery.cache_size_gb << 30) {
                         if freed > 0 {
