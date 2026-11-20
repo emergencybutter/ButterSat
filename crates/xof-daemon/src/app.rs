@@ -145,17 +145,17 @@ impl App {
         let mut storage_error = None;
         let configured = cfg.storage.cache_path.as_deref().map(xplane::native_path);
         let (cache_root, store) = match configured {
-            Some(root) => match TileStore::open(&root.join("imagery.redb")) {
+            Some(root) => match TileStore::open_or_repair(&root.join("imagery.redb")) {
                 Ok(s) => (root, s),
                 Err(e) => {
                     let msg =
                         format!("cache folder {} unusable ({e:#}); using {}", root.display(), dirs.cache.display());
                     tracing::warn!("{msg}");
                     storage_error = Some(msg);
-                    (dirs.cache.clone(), TileStore::open(&dirs.cache.join("imagery.redb"))?)
+                    (dirs.cache.clone(), TileStore::open_or_repair(&dirs.cache.join("imagery.redb"))?)
                 }
             },
-            None => (dirs.cache.clone(), TileStore::open(&dirs.cache.join("imagery.redb"))?),
+            None => (dirs.cache.clone(), TileStore::open_or_repair(&dirs.cache.join("imagery.redb"))?),
         };
         tracing::info!("cache folder: {}", cache_root.display());
         let stack = build_stack(&dirs, &cache_root, &cfg, store.clone(), xp.as_deref(), &rt)?;
@@ -560,7 +560,9 @@ impl App {
         let mut seen: Option<std::time::SystemTime> = None;
         loop {
             tick.tick().await;
-            if !self.config().prefetch.prewarm_last_position || !self.web.loading() {
+            // While the imagery cache is being repaired every cached tile
+            // looks missing: pre-warming would download them all again.
+            if !self.config().prefetch.prewarm_last_position || !self.web.loading() || self.store.is_repairing() {
                 continue;
             }
             let Some(xp) = self.xplane.lock().clone() else { continue };
@@ -658,6 +660,10 @@ impl App {
         let to = xplane::native_path(Path::new(req.path.trim()));
         storage::validate(&from, &to)?;
         anyhow::ensure!(storage::writable(&to), "can't write to {}", to.display());
+        anyhow::ensure!(
+            !self.store.is_repairing(),
+            "the imagery cache is being repaired after an unclean shutdown; try again in a few minutes"
+        );
         {
             let mut job = self.storage_job.lock();
             anyhow::ensure!(!job.as_ref().is_some_and(|j| j.state == "running"), "a cache move is already running");
@@ -756,8 +762,9 @@ impl App {
             let cfg = self.config().simbrief;
             let user = cfg.user.as_deref().map(str::trim).filter(|u| !u.is_empty()).map(str::to_string);
             // Read the flag first: a watch guard must not live across the await.
-            let sim_running = *self.web.connected.borrow();
-            if let (true, Some(user), false) = (cfg.prepare_departure, user, sim_running) {
+            // Also wait out an imagery cache repair (cached tiles look missing).
+            let busy = *self.web.connected.borrow() || self.store.is_repairing();
+            if let (true, Some(user), false) = (cfg.prepare_departure, user, busy) {
                 match airports::simbrief_latest(&user).await {
                     Ok(plan) if !plan.id.is_empty() && plan.id != last => {
                         let now = std::time::SystemTime::now()

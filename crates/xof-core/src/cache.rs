@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -73,19 +74,54 @@ pub struct AreaInfo {
 /// T1: raw imagery tiles keyed by provider and tile, grouped into areas for
 /// LRU eviction.
 pub struct TileStore {
-    /// `None` while closed (cache being moved): every operation fails, which
-    /// the engine treats as a cache miss.
+    /// `None` while closed (cache being moved) or being repaired: reads fail,
+    /// which the engine treats as a cache miss.
     db: RwLock<Option<Database>>,
     path: Mutex<PathBuf>,
     /// Pending last-access updates, flushed in batches.
     touched: Mutex<HashMap<[u8; 10], u64>>,
+    /// A background repair is running (see [`TileStore::open_or_repair`]).
+    repairing: AtomicBool,
+    /// Bumped by `close`/`reopen`: a background repair that finishes after
+    /// either is discarded.
+    generation: AtomicU64,
+}
+
+/// What to do when the file was not closed cleanly (crash, power loss,
+/// killed at reboot): redb then has to scan the whole file before use, which
+/// takes minutes on a large cache.
+#[derive(Clone, Copy, PartialEq)]
+enum Repair {
+    Run,
+    Refuse,
 }
 
 fn create_db(path: &Path) -> anyhow::Result<Database> {
+    create_db_with(path, Repair::Run)
+}
+
+fn create_db_with(path: &Path, repair: Repair) -> anyhow::Result<Database> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let db = Database::create(path)?;
+    let mut b = Database::builder();
+    match repair {
+        Repair::Refuse => {
+            b.set_repair_callback(|s| s.abort());
+        }
+        Repair::Run => {
+            let last = Mutex::new(-10i64);
+            b.set_repair_callback(move |s| {
+                let pct = (s.progress() * 100.0) as i64;
+                let mut l = last.lock();
+                if pct / 10 != *l / 10 {
+                    *l = pct;
+                    tracing::info!("imagery cache: repairing after an unclean shutdown, {pct}%");
+                }
+            });
+        }
+    }
+    let db = b.create(path)?;
     let tx = db.begin_write()?;
     tx.open_table(TILES)?;
     tx.open_table(AREAS)?;
@@ -96,11 +132,58 @@ fn create_db(path: &Path) -> anyhow::Result<Database> {
 impl TileStore {
     pub fn open(path: &Path) -> anyhow::Result<Arc<Self>> {
         let db = create_db(path)?;
-        Ok(Arc::new(Self {
-            db: RwLock::new(Some(db)),
+        Ok(Self::with(Some(db), path))
+    }
+
+    fn with(db: Option<Database>, path: &Path) -> Arc<Self> {
+        Arc::new(Self {
+            db: RwLock::new(db),
             path: Mutex::new(path.to_path_buf()),
             touched: Mutex::new(HashMap::new()),
-        }))
+            repairing: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
+        })
+    }
+
+    /// Open without waiting for a repair: if the file was not closed cleanly,
+    /// return at once with the store unavailable (misses, dropped writes) and
+    /// repair it on a background thread. Errors other than "needs repair"
+    /// are returned as with [`TileStore::open`].
+    pub fn open_or_repair(path: &Path) -> anyhow::Result<Arc<Self>> {
+        match create_db_with(path, Repair::Refuse) {
+            Ok(db) => Ok(Self::with(Some(db), path)),
+            Err(e) if matches!(e.downcast_ref::<redb::DatabaseError>(), Some(redb::DatabaseError::RepairAborted)) => {
+                tracing::warn!(
+                    "imagery cache {} was not closed cleanly: repairing in the background \
+                     (imagery is downloaded meanwhile)",
+                    path.display()
+                );
+                let s = Self::with(None, path);
+                s.repairing.store(true, Ordering::SeqCst);
+                let (me, path, gen) = (s.clone(), path.to_path_buf(), s.generation.load(Ordering::SeqCst));
+                std::thread::Builder::new().name("cache-repair".into()).spawn(move || {
+                    let t0 = std::time::Instant::now();
+                    let res = create_db(&path);
+                    let mut g = me.db.write();
+                    match res {
+                        Ok(db) if me.generation.load(Ordering::SeqCst) == gen && g.is_none() => {
+                            *g = Some(db);
+                            tracing::info!("imagery cache repaired in {:.0} s", t0.elapsed().as_secs_f64());
+                        }
+                        Ok(_) => tracing::info!("imagery cache repaired, but it was reopened elsewhere meanwhile"),
+                        Err(e) => tracing::error!("imagery cache repair failed: {e:#}"),
+                    }
+                    me.repairing.store(false, Ordering::SeqCst);
+                })?;
+                Ok(s)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// A background repair is running.
+    pub fn is_repairing(&self) -> bool {
+        self.repairing.load(Ordering::SeqCst)
     }
 
     /// The database file.
@@ -112,13 +195,16 @@ impl TileStore {
     /// in-flight operations.
     pub fn close(&self) -> anyhow::Result<()> {
         let _ = self.flush_access();
-        self.db.write().take();
+        let mut g = self.db.write();
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        g.take();
         Ok(())
     }
 
     /// Open (or create) the database at `path` and use it from now on.
     pub fn reopen(&self, path: &Path) -> anyhow::Result<()> {
         let mut g = self.db.write();
+        self.generation.fetch_add(1, Ordering::SeqCst);
         g.take();
         *g = Some(create_db(path)?);
         *self.path.lock() = path.to_path_buf();
@@ -126,8 +212,13 @@ impl TileStore {
     }
 
     fn db(&self) -> anyhow::Result<MappedRwLockReadGuard<'_, Database>> {
-        RwLockReadGuard::try_map(self.db.read(), |d| d.as_ref())
-            .map_err(|_| anyhow::anyhow!("imagery cache is closed (being moved)"))
+        RwLockReadGuard::try_map(self.db.read(), |d| d.as_ref()).map_err(|_| {
+            if self.is_repairing() {
+                anyhow::anyhow!("imagery cache is being repaired")
+            } else {
+                anyhow::anyhow!("imagery cache is closed (being moved)")
+            }
+        })
     }
 
     pub fn get(&self, provider: &str, t: TileCoord) -> anyhow::Result<Option<Fetched>> {
@@ -151,6 +242,10 @@ impl TileStore {
     }
 
     pub fn put(&self, provider: &str, t: TileCoord, f: &Fetched) -> anyhow::Result<()> {
+        if self.is_repairing() && self.db.read().is_none() {
+            // Not cached this time; the tile is downloaded again if needed.
+            return Ok(());
+        }
         let p = provider_byte(provider);
         let mut val = Vec::with_capacity(9 + if let Fetched::Data(b) = f { b.len() } else { 0 });
         let ts = now();
@@ -363,6 +458,58 @@ mod tests {
         s.reopen(&b).unwrap();
         assert_eq!(s.path(), b);
         assert!(matches!(s.get("esri", t).unwrap(), Some(Fetched::Data(d)) if &d[..] == b"jpeg"));
+    }
+
+    /// Helper for the test below (does nothing unless run by it).
+    #[test]
+    fn crash_helper() {
+        let Some(path) = std::env::var_os("XOF_CRASH_HELPER_DB") else { return };
+        let s = TileStore::open(Path::new(&path)).unwrap();
+        s.put("esri", TileCoord::new(16, 100, 200), &Fetched::Data(Bytes::from_static(b"jpeg"))).unwrap();
+        {
+            let db = s.db().unwrap();
+            let mut tx = db.begin_write().unwrap();
+            tx.set_durability(Durability::Immediate);
+            tx.commit().unwrap();
+        }
+        std::mem::forget(s);
+        std::process::exit(0);
+    }
+
+    #[test]
+    fn unclean_file_opens_at_once_and_repairs_in_background() {
+        let dir = tempfile::tempdir().unwrap();
+        let copy = dir.path().join("crashed.redb");
+        let t = TileCoord::new(16, 100, 200);
+        // A child process writes a tile and exits without closing the
+        // database, like a daemon killed at reboot.
+        let st = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "cache::tests::crash_helper", "--nocapture", "--test-threads=1"])
+            .env("XOF_CRASH_HELPER_DB", &copy)
+            .status()
+            .unwrap();
+        assert!(st.success());
+        assert!(
+            matches!(
+                create_db_with(&copy, Repair::Refuse).map(|_| ()).map_err(|e| e.downcast::<redb::DatabaseError>()),
+                Err(Ok(redb::DatabaseError::RepairAborted))
+            ),
+            "the copy needs repair"
+        );
+        let s = TileStore::open_or_repair(&copy).unwrap();
+        // Usable at once: writes are dropped, reads miss, nothing blocks.
+        s.put("esri", TileCoord::new(16, 1, 1), &Fetched::NoData).unwrap();
+        let t0 = std::time::Instant::now();
+        while s.is_repairing() {
+            assert!(t0.elapsed().as_secs() < 30, "repair did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(matches!(s.get("esri", t).unwrap(), Some(Fetched::Data(d)) if &d[..] == b"jpeg"));
+        // Once closed cleanly, it opens directly.
+        drop(s);
+        let s = TileStore::open_or_repair(&copy).unwrap();
+        assert!(!s.is_repairing());
+        assert!(s.get("esri", t).unwrap().is_some());
     }
 
     #[test]
