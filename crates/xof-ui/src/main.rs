@@ -352,7 +352,8 @@ async fn auto_update(app: AppHandle) {
     }
 }
 
-/// Check the update feed (`https://satsrv.butr.cc/updates/latest.json`).
+/// Check the update feed (`https://buttersat.butr.cc/updates/latest.json`,
+/// falling back to the pre-0.1.8 address on satsrv.butr.cc).
 #[tauri::command]
 async fn update_check(app: AppHandle) -> Result<Value, String> {
     let updater = updater(&app)?;

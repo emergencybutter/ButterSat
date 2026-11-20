@@ -12,7 +12,7 @@ Inputs:
 
 What it does: downloads the CI artifacts, signs the update files (macOS
 .app.tar.gz, Linux AppImage and .deb) with the updater key, which never
-leaves this machine, uploads everything to satsrv.butr.cc/updates/, then
+leaves this machine, uploads everything to buttersat.butr.cc/updates/, then
 writes latest.json last (all platforms) and checks every public URL against
 the local SHA-256. Without --go it only shows the plan.
 """
@@ -34,7 +34,9 @@ NSIS = os.path.join(ROOT, "target", "release", "bundle", "nsis")
 KEY = r"C:\Users\me\Desktop\Projects\xporthofs-build\keys\updater.key"
 HOST = "user@update-server"
 REMOTE = "/var/www/buttersat/updates"
-BASE = "https://satsrv.butr.cc/updates"
+BASE = "https://buttersat.butr.cc/updates"
+# Pre-0.1.8 apps read the feed here (same files on selfhost); checked too.
+OLD_FEED = "https://satsrv.butr.cc/updates/latest.json"
 TAURI = ["npx", "--yes", "@tauri-apps/cli@2.12.4"]
 
 
@@ -154,6 +156,9 @@ def main():
     req = urllib.request.Request(f"{BASE}/latest.json", headers={"User-Agent": "ButterSat-release", "Cache-Control": "no-cache"})
     live = json.load(urllib.request.urlopen(req, timeout=60))
     print(f"feed: {live['version']} for {', '.join(sorted(live['platforms']))}")
+    req = urllib.request.Request(OLD_FEED, headers={"User-Agent": "ButterSat-release", "Cache-Control": "no-cache"})
+    old = json.load(urllib.request.urlopen(req, timeout=60))
+    print(f"old feed address: {old['version']}")
     shutil.rmtree(work, ignore_errors=True)
 
 

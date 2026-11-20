@@ -1,6 +1,6 @@
 # Release Process
 
-This document covers how ButterSat releases are versioned, built, signed, staged for auto-updates, published to `satsrv.butr.cc` (`update-server`), and rolled back.
+This document covers how ButterSat releases are versioned, built, signed, staged for auto-updates, published to `buttersat.butr.cc/updates/` (`update-server`), and rolled back.
 
 ---
 
@@ -71,9 +71,9 @@ This produces:
 
 ---
 
-## 4. Publishing an Update (`satsrv.butr.cc`)
+## 4. Publishing an Update (`buttersat.butr.cc/updates`)
 
-The app checks `https://satsrv.butr.cc/updates/latest.json` 20 s after it starts and every 6 hours (also **Check for updates** in About). With **Install updates automatically** on (default, `startup.auto_update`), it installs by itself as soon as X-Plane is neither running nor connected (re-checked every 5 minutes); otherwise the Overview banner's **Install update** button does the same.
+The app checks `https://buttersat.butr.cc/updates/latest.json` (0.1.8+; falls back to `https://satsrv.butr.cc/updates/latest.json`, the only feed address of 0.1.0–0.1.7, served from the same folder: keep that DNS name until those versions are gone) 20 s after it starts and every 6 hours (also **Check for updates** in About). With **Install updates automatically** on (default, `startup.auto_update`), it installs by itself as soon as X-Plane is neither running nor connected (re-checked every 5 minutes); otherwise the Overview banner's **Install update** button does the same.
 
 One update replaces the app **and the daemon and CLI** (sidecars in the same NSIS bundle): the app stops the daemon (plain shutdown, the On/Off switch is untouched), the updater runs the installer with `/UPDATE` and exits, `NSIS_HOOK_PREINSTALL` stops any daemon again, the files are replaced, and the installer relaunches the app, which starts the new daemon if ButterSat is on. Verified end-to-end on 2026-11-16 (0.1.2 → 0.1.3 test builds): all three executables replaced, daemon log `0.1.2 … shutdown requested … 0.1.3 starting … mounted` within 8 s, no user action.
 
@@ -93,7 +93,7 @@ Create `latest.json` with the signature from `ButterSat_<version>_x64-setup.exe.
   "platforms": {
     "windows-x86_64": {
       "signature": "<contents of ButterSat_0.1.0_x64-setup.exe.sig>",
-      "url": "https://satsrv.butr.cc/updates/ButterSat_0.1.0_x64-setup.exe"
+      "url": "https://buttersat.butr.cc/updates/ButterSat_0.1.0_x64-setup.exe"
     }
   }
 }
@@ -120,8 +120,8 @@ ssh user@update-server "nginx -t && systemctl reload nginx"
 Verify the feed and installer headers from outside:
 
 ```bash
-curl -fsSL https://satsrv.butr.cc/updates/latest.json
-curl -fsSI https://satsrv.butr.cc/updates/ButterSat_0.1.0_x64-setup.exe
+curl -fsSL https://buttersat.butr.cc/updates/latest.json
+curl -fsSI https://buttersat.butr.cc/updates/ButterSat_0.1.0_x64-setup.exe
 ```
 
 ---
