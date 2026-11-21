@@ -31,11 +31,15 @@ import urllib.request
 REPO = "emergencybutter/ButterSat"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 NSIS = os.path.join(ROOT, "target", "release", "bundle", "nsis")
-KEY = r"C:\Users\me\Desktop\Projects\xporthofs-build\keys\updater.key"
-HOST = "user@update-server"
+# Machine-specific settings come from the environment, not the repo:
+# BUTTERSAT_UPDATER_KEY (default: the build workspace next to the repo) and
+# BUTTERSAT_RELEASE_HOST (ssh destination of the update server, e.g. user@host).
+KEY = os.environ.get("BUTTERSAT_UPDATER_KEY") or os.path.join(
+    os.path.dirname(ROOT), "xporthofs-build", "keys", "updater.key")
+HOST = os.environ.get("BUTTERSAT_RELEASE_HOST", "")
 REMOTE = "/var/www/buttersat/updates"
 BASE = "https://buttersat.butr.cc/updates"
-# Pre-0.1.8 apps read the feed here (same files on selfhost); checked too.
+# Pre-0.1.8 apps read the feed here (same files on the update server); checked too.
 OLD_FEED = "https://satsrv.butr.cc/updates/latest.json"
 TAURI = ["npx", "--yes", "@tauri-apps/cli@2.12.4"]
 
@@ -80,6 +84,10 @@ def main():
     ap.add_argument("--notes", default="")
     a = ap.parse_args()
     v = a.version
+    if a.go and not HOST:
+        sys.exit("set BUTTERSAT_RELEASE_HOST to the update server's ssh destination (user@host)")
+    if a.go and not os.path.exists(KEY):
+        sys.exit(f"updater key not found at {KEY}: set BUTTERSAT_UPDATER_KEY")
 
     win = os.path.join(NSIS, f"ButterSat_{v}_x64-setup.exe")
     if not (os.path.exists(win) and os.path.exists(win + ".sig")):

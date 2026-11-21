@@ -1,5 +1,5 @@
 //! Partial mirrors: one signed manifest, objects split across hosts (the US on
-//! selfhost, the rest of the world on R2). A 404 means "not on this mirror".
+//! a self-hosted origin, the rest of the world on R2). A 404 means "not on this mirror".
 
 use std::path::PathBuf;
 
@@ -55,7 +55,7 @@ async fn object_missing_on_first_mirror_comes_from_the_next() {
     let (us_url, world_url) = (serve(us.clone()).await, serve(world.clone()).await);
     let client = CatalogClient::new(vec![], &cache).unwrap();
 
-    // World-first order (as shipped): US objects fall through to selfhost.
+    // World-first order (as shipped): US objects fall through to the US origin.
     let mirrors = vec![world_url.clone(), us_url.clone()];
     assert_eq!(client.fetch_object(&mirrors, &object("tiles/nyc.dsf.zst", &nyc)).await.unwrap(), nyc);
     assert_eq!(client.fetch_object(&mirrors, &object("tiles/paris.dsf.zst", &paris)).await.unwrap(), paris);

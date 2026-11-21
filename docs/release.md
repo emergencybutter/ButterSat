@@ -1,6 +1,6 @@
 # Release Process
 
-This document covers how ButterSat releases are versioned, built, signed, staged for auto-updates, published to `buttersat.butr.cc/updates/` (`update-server`), and rolled back.
+This document covers how ButterSat releases are versioned, built, signed, staged for auto-updates, published to `buttersat.butr.cc/updates/` (the update server, reached over SSH as `$BUTTERSAT_RELEASE_HOST`), and rolled back.
 
 ---
 
@@ -23,7 +23,7 @@ cargo build -p xof-ui
 
 ## 2. Signing Keys
 
-ButterSat uses two separate keypairs stored outside the repository in `C:\Users\me\Desktop\Projects\xporthofs-build\keys\` (never commit private keys to git or print them in logs):
+ButterSat uses two separate keypairs stored outside the repository, in `xporthofs-build\keys\` next to the repository checkout (`BUTTERSAT_UPDATER_KEY` overrides the updater key's path) (never commit private keys to git or print them in logs):
 
 - **Mesh catalog signing key** (`release-signing.key` / `release-signing.pub`, Ed25519): signs `manifest.json.zst` via `xof-publish`. Its public key is embedded in `crates/xof-proto/src/config.rs` (`DEFAULT_MESH_KEYS`).
 - **Tauri auto-updater signing key** (`updater.key` / `updater.key.pub`, Minisign): signs Windows NSIS installer bundles (`*.exe.sig`) for `tauri-plugin-updater`. Its public key is embedded in [`crates/xof-ui/tauri.conf.json`](../crates/xof-ui/tauri.conf.json) under `plugins.updater.pubkey`.
@@ -50,7 +50,7 @@ This script:
 Provide the updater private key via `TAURI_SIGNING_PRIVATE_KEY` (and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` for a passwordless key) and run `cargo tauri build`:
 
 ```powershell
-$env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content -Raw "C:\Users\me\Desktop\Projects\xporthofs-build\keys\updater.key").Trim()
+$env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content -Raw "..\xporthofs-build\keys\updater.key").Trim()
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
 Push-Location crates/xof-ui
 cargo tauri build --bundles nsis --config tauri.release.conf.json
@@ -99,22 +99,24 @@ Create `latest.json` with the signature from `ButterSat_<version>_x64-setup.exe.
 }
 ```
 
-### Step 2: Upload to `update-server`
+### Step 2: Upload to the update server
 
-Upload the versioned installer, its `.sig` file, and `latest.json` to `/var/www/buttersat/updates/` on `selfhost`:
+`BUTTERSAT_RELEASE_HOST` holds the server's SSH destination (`user@host`), kept out of the repository; `tools/release/publish_release.py` reads it too.
+
+Upload the versioned installer, its `.sig` file, and `latest.json` to `/var/www/buttersat/updates/` on the update server:
 
 ```bash
-ssh user@update-server "mkdir -p /var/www/buttersat/updates"
+ssh "$BUTTERSAT_RELEASE_HOST" "mkdir -p /var/www/buttersat/updates"
 scp target/release/bundle/nsis/ButterSat_0.1.0_x64-setup.exe \
     target/release/bundle/nsis/ButterSat_0.1.0_x64-setup.exe.sig \
     latest.json \
-    user@update-server:/var/www/buttersat/updates/
+    "$BUTTERSAT_RELEASE_HOST":/var/www/buttersat/updates/
 ```
 
 Ensure `/etc/nginx/conf.d/buttersat.conf` (or `/etc/nginx/sites-available/buttersat.conf`) matches [`deploy/nginx/buttersat.conf`](../deploy/nginx/buttersat.conf) and reload nginx:
 
 ```bash
-ssh user@update-server "nginx -t && systemctl reload nginx"
+ssh "$BUTTERSAT_RELEASE_HOST" "nginx -t && systemctl reload nginx"
 ```
 
 Verify the feed and installer headers from outside:
@@ -130,7 +132,7 @@ curl -fsSI https://buttersat.butr.cc/updates/ButterSat_0.1.0_x64-setup.exe
 
 Because versioned installer artifacts in `/var/www/buttersat/updates/` are immutable (`Cache-Control: public, max-age=31536000, immutable`) and `latest.json` has a short 5-minute TTL (`Cache-Control: public, max-age=300`):
 
-1. **Revert `latest.json`**: point `latest.json` back to the previous known-good version's `version`, `url`, and `signature`, and upload it to `/var/www/buttersat/updates/latest.json` on `selfhost`.
+1. **Revert `latest.json`**: point `latest.json` back to the previous known-good version's `version`, `url`, and `signature`, and upload it to `/var/www/buttersat/updates/latest.json` on the update server.
 2. **Purge or wait 5 minutes**: within 5 minutes (or immediately after purging `/updates/latest.json` in Cloudflare), clients checking for updates will see the previous release version.
 3. **Emergency takedown**: if no update should be served at all, replace `latest.json` with a version matching the oldest deployed client (`0.1.0`) so `tauri-plugin-updater` sees `remote_version <= current_version` and reports "Up to date".
 

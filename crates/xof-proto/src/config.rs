@@ -10,7 +10,7 @@ use xof_mesh::Coverage;
 /// first successful fetch.
 pub const DEFAULT_MESH_MIRRORS: &[&str] = &["https://tiles.butr.cc/v1"];
 
-/// Former mirror (selfhost): now only redirects to `tiles.butr.cc`. Saved configs
+/// Former self-hosted mirror: now only redirects to `tiles.butr.cc`. Saved configs
 /// that still list it are rewritten on load.
 const RETIRED_MESH_MIRROR: &str = "https://satsrv.butr.cc/v1";
 
