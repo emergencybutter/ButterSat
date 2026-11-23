@@ -41,7 +41,10 @@ REMOTE = "/var/www/buttersat/updates"
 BASE = "https://buttersat.butr.cc/updates"
 # Pre-0.1.8 apps read the feed here (same files on the update server); checked too.
 OLD_FEED = "https://satsrv.butr.cc/updates/latest.json"
-TAURI = ["npx", "--yes", "@tauri-apps/cli@2.12.4"]
+# The Tauri CLI: the cargo-installed one (`cargo install tauri-cli --version
+# 2.12.4 --locked`) when present, else the npm package.
+TAURI = (["cargo", "tauri"] if shutil.which("cargo-tauri")
+         else ["npx", "--yes", "@tauri-apps/cli@2.12.4"])
 
 
 def run(cmd, **kw):
