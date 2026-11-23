@@ -408,6 +408,52 @@ let map = null;
 let mapReady = false;
 let catalogTiles = [];
 
+// Background imagery for the map: the user's commercial provider once they
+// have accepted its terms, otherwise USGS (public domain).
+const MAP_IMAGERY = {
+  esri: {
+    type: "raster",
+    tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+    tileSize: 256,
+    maxzoom: 17,
+    attribution: "Imagery © Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+  },
+  bing: {
+    type: "raster",
+    tiles: [0, 1, 2, 3].map((s) => `https://ecn.t${s}.tiles.virtualearth.net/tiles/a{quadkey}.jpeg?g=136`),
+    tileSize: 256,
+    maxzoom: 18,
+    attribution: "Imagery © Microsoft Bing Maps",
+  },
+  usgs: {
+    type: "raster",
+    tiles: ["https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"],
+    tileSize: 256,
+    maxzoom: 16,
+    attribution: "Imagery: USGS The National Map (3DEP / NAIP, public domain)",
+  },
+};
+const MAP_IMAGERY_LAYER = { id: "imagery", type: "raster", source: "imagery", paint: { "raster-saturation": -0.35, "raster-brightness-max": 0.85 } };
+let mapImageryKey = null;
+
+function mapImageryChoice(c) {
+  const im = (c && c.imagery) || {};
+  if (im.provider_notice_accepted && (im.provider === "esri" || im.provider === "bing")) return im.provider;
+  return "usgs";
+}
+
+// Follow a provider change made after the map was created.
+function updateMapImagery() {
+  if (!map || !mapReady) return;
+  const key = mapImageryChoice(config);
+  if (key === mapImageryKey) return;
+  map.removeLayer("imagery");
+  map.removeSource("imagery");
+  map.addSource("imagery", MAP_IMAGERY[key]);
+  map.addLayer(MAP_IMAGERY_LAYER, map.getStyle().layers[0]?.id);
+  mapImageryKey = key;
+}
+
 function tileToLatLon(x, y, z) {
   const n = Math.PI - (2 * Math.PI * y) / 2 ** z;
   return [(180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))), (x / 2 ** z) * 360 - 180];
@@ -432,27 +478,13 @@ async function initMap() {
       config = await rpc("get_config");
     } catch (_) {}
   }
-  const useEsri = !!(config && config.imagery && config.imagery.provider_notice_accepted);
-  const tiles = useEsri
-    ? ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"]
-    : ["https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"];
-  const attribution = useEsri
-    ? "Imagery © Esri, Maxar, Earthstar Geographics, and the GIS User Community"
-    : "Imagery: USGS The National Map (3DEP / NAIP, public domain)";
+  mapImageryKey = mapImageryChoice(config);
   map = new maplibregl.Map({
     container: "mapview",
     style: {
       version: 8,
-      sources: {
-        imagery: {
-          type: "raster",
-          tiles,
-          tileSize: 256,
-          maxzoom: useEsri ? 17 : 16,
-          attribution,
-        },
-      },
-      layers: [{ id: "imagery", type: "raster", source: "imagery", paint: { "raster-saturation": -0.35, "raster-brightness-max": 0.85 } }],
+      sources: { imagery: MAP_IMAGERY[mapImageryKey] },
+      layers: [MAP_IMAGERY_LAYER],
     },
     center: [-73.9, 40.7],
     zoom: 6,
@@ -609,6 +641,7 @@ $("f-settings").addEventListener("submit", async (ev) => {
   try {
     const r = await rpc("set_config", c);
     config = c;
+    updateMapImagery();
     out.textContent = r.note || "Saved and applied.";
   } catch (e) {
     out.className = "result err";
@@ -708,6 +741,7 @@ async function saveImageryChoice(patch) {
   Object.assign(c.imagery, patch, { source_chosen: true });
   await rpc("set_config", c);
   config = c;
+  updateMapImagery();
 }
 
 async function firstRun() {

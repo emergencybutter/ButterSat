@@ -16,13 +16,33 @@ use crate::config::{DaemonConfig, Dirs};
 use crate::{method, xplane, Client};
 
 /// Persist the switch in the config file (creating it if needed).
+///
+/// A config file that exists but can't be read or parsed is an error, never
+/// replaced with defaults: that would silently reset every other setting.
 pub fn set_enabled(config_path: &Path, enabled: bool) -> anyhow::Result<DaemonConfig> {
-    let mut cfg = DaemonConfig::load(config_path).unwrap_or_default();
+    let mut cfg = load_retrying(config_path)?;
     if cfg.startup.enabled != enabled {
         cfg.startup.enabled = enabled;
         cfg.save(config_path)?;
     }
     Ok(cfg)
+}
+
+/// Load the config, retrying briefly: on Windows a read can fail for a
+/// moment while the daemon renames a freshly saved file into place.
+fn load_retrying(config_path: &Path) -> anyhow::Result<DaemonConfig> {
+    let mut last = None;
+    for attempt in 0..5 {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        match DaemonConfig::load(config_path) {
+            Ok(c) => return Ok(c),
+            Err(e) => last = Some(e),
+        }
+    }
+    let e = last.expect("at least one attempt");
+    Err(e.context(format!("cannot read {}; leaving it unchanged", config_path.display())))
 }
 
 /// The X-Plane installs whose `scenery_packs.ini` we manage: the configured
@@ -121,4 +141,28 @@ pub async fn turn_off() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_enabled_keeps_settings_and_never_resets_an_unreadable_config() {
+        let dir = std::env::temp_dir().join(format!("xof-power-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("config.toml");
+
+        std::fs::write(&p, "[imagery]\nprovider = \"bing\"\n").unwrap();
+        let cfg = set_enabled(&p, false).unwrap();
+        assert!(!cfg.startup.enabled);
+        assert_eq!(DaemonConfig::load(&p).unwrap().imagery.provider, "bing");
+
+        let broken = "[imagery\nprovider = \"bing\"\n";
+        std::fs::write(&p, broken).unwrap();
+        assert!(set_enabled(&p, true).is_err());
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), broken);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
