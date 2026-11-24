@@ -95,7 +95,14 @@ async fn ensure(app: &AppHandle, conn: &Conn) -> Result<Client, String> {
 /// Generic JSON-RPC passthrough to the daemon.
 #[tauri::command]
 async fn rpc(app: AppHandle, conn: State<'_, Conn>, method: String, params: Option<Value>) -> Result<Value, String> {
-    let client = ensure(&app, &conn).await?;
+    let client = match ensure(&app, &conn).await {
+        Ok(c) => c,
+        // Switched off: Settings still read and write the config file.
+        Err(e) if e == OFF && (method == method::GET_CONFIG || method == method::SET_CONFIG) => {
+            return config_while_off(&method, params);
+        }
+        Err(e) => return Err(e),
+    };
     match client.call::<_, Value>(&method, params.unwrap_or(Value::Null)).await {
         Ok(v) => Ok(v),
         Err(e) => {
@@ -105,6 +112,27 @@ async fn rpc(app: AppHandle, conn: State<'_, Conn>, method: String, params: Opti
             Err(e.to_string())
         }
     }
+}
+
+/// `get_config` / `set_config` on the config file while ButterSat is off (no
+/// daemon). Like the daemon's `set_config`, the cache folder is kept (it
+/// changes only through storage_relocate); so is the On/Off switch. The
+/// daemon applies the rest, including start at login, when it next starts.
+fn config_while_off(method_name: &str, params: Option<Value>) -> Result<Value, String> {
+    let path = Dirs::standard().config_file;
+    let current = DaemonConfig::load(&path).map_err(|e| format!("cannot read {}: {e:#}", path.display()))?;
+    if method_name == method::GET_CONFIG {
+        return serde_json::to_value(current).map_err(|e| e.to_string());
+    }
+    let mut new: DaemonConfig =
+        serde_json::from_value(params.unwrap_or(Value::Null)).map_err(|e| format!("invalid params: {e}"))?;
+    new.storage = current.storage;
+    new.startup.enabled = current.startup.enabled;
+    new.save(&path).map_err(|e| format!("cannot save {}: {e:#}", path.display()))?;
+    Ok(serde_json::json!({
+        "applied": false,
+        "note": "Saved. ButterSat is off: the changes apply when you turn it on.",
+    }))
 }
 
 /// The last `lines` lines of the daemon log, read from disk (works even when

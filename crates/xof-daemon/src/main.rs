@@ -105,6 +105,18 @@ fn main() -> anyhow::Result<()> {
 
     let _guard = rt.enter();
     let app = App::new(dirs, config_path, rt.handle().clone())?;
+    // Make the login registration match the setting: the app also saves
+    // settings while ButterSat is off, without a daemon to apply them. Never
+    // with XOF_HOME (tests, bench, portable): that would touch the real
+    // per-user login entry.
+    if std::env::var_os("XOF_HOME").is_none() {
+        let at_login = app.config().startup.start_at_login;
+        std::thread::spawn(move || {
+            if let Err(e) = autostart::apply(at_login) {
+                tracing::warn!("start at login: {e:#}");
+            }
+        });
+    }
     // Route log events into the app's event stream.
     {
         let events = app.events.clone();

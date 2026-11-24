@@ -611,8 +611,24 @@ function set(o, path, v) {
   ks.reduce((x, k) => x[k], o)[last] = v;
 }
 
+let settingsLoaded = false;
+
 async function loadSettings() {
-  config = await rpc("get_config");
+  const out = $("settings-result");
+  try {
+    config = await rpc("get_config");
+  } catch (e) {
+    // Never leave the form showing its HTML defaults as if they were the settings.
+    settingsLoaded = false;
+    out.className = "result err";
+    out.textContent = "Could not load the settings: " + String(e);
+    return;
+  }
+  settingsLoaded = true;
+  if (out.classList.contains("err")) {
+    out.className = "result";
+    out.textContent = "";
+  }
   for (const el of $("f-settings").elements) {
     if (!el.name) continue;
     const v = get(config, el.name);
@@ -625,6 +641,11 @@ async function loadSettings() {
 $("f-settings").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const out = $("settings-result");
+  if (!settingsLoaded || !config) {
+    out.className = "result err";
+    out.textContent = "The settings were not loaded, so nothing was saved. Reopen Settings and try again.";
+    return;
+  }
   const c = structuredClone(config);
   for (const el of ev.target.elements) {
     if (!el.name) continue;
