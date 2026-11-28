@@ -1,0 +1,48 @@
+# Night textures served black by day (design §5.6): does X-Plane read them
+# again when night falls over scenery it already loaded? Load Midtown at
+# 17:00 (sun ≈ 30°: black), then switch to 21:30 next door (same textures
+# loaded), come back, and finish in an area first loaded at night. Every
+# spot sets its time through the clock dataref (no scenery reload).
+name = "nyc-dusk"
+day_of_year = 172
+local_time_h = 21.5
+slew_speed_kt = 250
+shots_s = [0, 10, 30, 60]
+origin = "../../xporthofs-build/origin"
+public_keys = ["7edb3db45bc7858959a6347242b3804b7f360012446389288f417323290ddf94"]
+
+[[spot]]
+name = "Midtown (17:00, day)"
+lat = 40.7540
+lon = -73.9840
+alt_ft = 2500
+local_time_h = 17.0
+
+[[spot]]
+name = "Central Park (21:30)"
+lat = 40.7829
+lon = -73.9654
+alt_ft = 2500
+local_time_h = 21.5
+
+[[spot]]
+name = "Midtown again (21:30)"
+lat = 40.7540
+lon = -73.9840
+alt_ft = 2500
+local_time_h = 21.5
+
+[[spot]]
+name = "Hempstead (first loaded at night)"
+lat = 40.7300
+lon = -73.6000
+alt_ft = 3000
+local_time_h = 21.5
+
+[[variant]]
+name = "xof-night"
+description = "ButterSat, night textures (normal), black by day"
+xof = true
+cache = "persistent"
+[variant.config.night]
+lights = "normal"

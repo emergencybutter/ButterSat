@@ -117,6 +117,7 @@ fn build_stack(
                 global_scenery: xp.and_then(xplane::global_scenery),
                 coverage: cfg.mesh.coverage.clone(),
                 pinned,
+                night: cfg.night.lights.luminance().is_some(),
             },
             trusted_keys(cfg),
         )?)
@@ -126,7 +127,11 @@ fn build_stack(
     let mut names = cfg.xplane.process_names.clone();
     names.extend(xof_vfs::process::DEFAULT_XPLANE_PROCESSES.iter().map(|s| s.to_string()));
     let scenery = Scenery::new(
-        SceneryConfig { packs: imported_packs(dirs, cfg), ter: TerParams::default(), xplane_processes: names },
+        SceneryConfig {
+            packs: imported_packs(dirs, cfg),
+            ter: TerParams { lit_luminance: cfg.night.lights.luminance(), ..TerParams::default() },
+            xplane_processes: names,
+        },
         mesh.clone(),
         engine.clone(),
         rt.clone(),

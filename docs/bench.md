@@ -37,8 +37,11 @@ catalog folder containing `v1/`, served on 127.0.0.1 for `xof` variants),
 `public_keys`, `disable_packs`, `isolate_packs` (default `true`: every other
 Custom Scenery pack is disabled, including folders missing from the ini, so
 only X-Plane's base scenery and global airports remain), `compare_to`.
-`[[spot]]` has `name`, `lat`, `lon`, `alt_ft` (MSL) and an optional
-`slew_speed_kt` for the leg that ends there. `[[variant]]` has:
+`[[spot]]` has `name`, `lat`, `lon`, `alt_ft` (MSL), an optional
+`slew_speed_kt` for the leg that ends there, and an optional `local_time_h`.
+That sets the clock on arrival through `sim/time/zulu_time_sec`, for example
+to go from day to night over scenery already loaded. Patching the flight's
+time would make X-Plane reload all scenery. `[[variant]]` has:
 
 | key | meaning |
 |---|---|

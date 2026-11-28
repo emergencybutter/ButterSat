@@ -177,7 +177,7 @@ async fn fly(
             first.alt_ft * FT,
             0.0,
             sc.day_of_year,
-            sc.local_time_h,
+            first.local_time_h.unwrap_or(sc.local_time_h),
         ))
         .await?;
         // Freeze as soon as datarefs exist so the aircraft doesn't fly off.
@@ -201,11 +201,29 @@ async fn fly(
                 log(format!("slewed to {} ({:.1} km)", spot.name, d / 1000.0));
             }
             camera(xp, sc.fov_deg).await?;
-            let _ = xp
-                .patch_flight(
-                    &json!({ "local_time": { "day_of_year": sc.day_of_year, "time_in_24_hours": sc.local_time_h } }),
-                )
-                .await;
+            match spot.local_time_h {
+                // Move the clock through its dataref: patching the flight's
+                // time makes X-Plane reload all scenery (12.4.4).
+                Some(h) => {
+                    let r: anyhow::Result<()> = async {
+                        let local = xp.get_f64("sim/time/local_time_sec").await?;
+                        let zulu = xp.get_f64("sim/time/zulu_time_sec").await?;
+                        xp.set("sim/time/zulu_time_sec", json!(zulu + h * 3600.0 - local)).await
+                    }
+                    .await;
+                    if let Err(e) = r {
+                        log(format!("could not set the clock to {h} h: {e:#}"));
+                    }
+                }
+                None => {
+                    let _ = xp
+                        .patch_flight(&json!({ "local_time": {
+                            "day_of_year": sc.day_of_year,
+                            "time_in_24_hours": sc.local_time_h
+                        } }))
+                        .await;
+                }
+            }
             let arrive = Instant::now();
             sr.arrive = t0.elapsed().as_secs_f64();
             if let Some(d) = dmn {
@@ -402,7 +420,8 @@ mod tests {
 
     #[test]
     fn offsets() {
-        let s = Spot { name: "x".into(), lat: 40.65, lon: -73.77, alt_ft: 1000.0, slew_speed_kt: None };
+        let s =
+            Spot { name: "x".into(), lat: 40.65, lon: -73.77, alt_ft: 1000.0, slew_speed_kt: None, local_time_h: None };
         let (e, n, u) = offset(40.64, -73.78, 0.0, &s);
         assert!((e - 844.0).abs() < 5.0, "{e}");
         assert!((n - 1105.7).abs() < 1.0, "{n}");

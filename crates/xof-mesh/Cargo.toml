@@ -22,9 +22,11 @@ md-5.workspace = true
 sevenz-rust2.workspace = true
 futures.workspace = true
 hex.workspace = true
+lru.workspace = true
 base64 = "0.22"
 
 [dev-dependencies]
 tempfile.workspace = true
 rand.workspace = true
+image.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

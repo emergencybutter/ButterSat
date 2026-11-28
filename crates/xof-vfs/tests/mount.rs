@@ -151,6 +151,7 @@ fn mount_and_read_through_os() {
             global_scenery: None,
             coverage: Coverage::World,
             pinned: HashSet::new(),
+            night: false,
         },
         vec![key.verifying_key()],
     )

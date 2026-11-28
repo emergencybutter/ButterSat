@@ -207,6 +207,15 @@
         <h3>Meshes</h3>
         <label class="check"><input type="checkbox" name="mesh.enabled"> Stream meshes from the catalog</label>
         <label>Mesh cache size (GB)<input type="number" name="mesh.cache_size_gb" min="1" max="2000"></label>
+        <label>Town lights at night
+          <select name="night.lights">
+            <option value="normal">Normal</option>
+            <option value="soft">Soft</option>
+            <option value="strong">Strong</option>
+            <option value="off">Off (towns on the photo stay dark at night)</option>
+          </select>
+        </label>
+        <p class="muted small">Street lamps and windows drawn along X-Plane's own roads, read from your X-Plane 12 Global Scenery. Applies the next time X-Plane starts.</p>
         <label>Catalog mirrors (one per line)<textarea name="mesh.mirrors" rows="2"></textarea></label>
         <label>Trusted catalog keys (one per line)<textarea name="mesh.public_keys" rows="2" class="mono"></textarea></label>
 

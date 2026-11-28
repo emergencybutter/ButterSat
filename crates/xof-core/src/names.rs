@@ -191,12 +191,33 @@ pub struct TerParams {
     pub decal: bool,
     /// Whether land casts shadows (`terrain_casts_shadows`).
     pub land_casts_shadows: bool,
+    /// Night textures (design §5.6): land terrain names its lit texture and
+    /// shows it at this `LUMINANCE`. `None`: no night texture.
+    pub lit_luminance: Option<u16>,
 }
 
 impl Default for TerParams {
     fn default() -> Self {
-        Self { mask_zl: 14, decal: false, land_casts_shadows: true }
+        Self { mask_zl: 14, decal: false, land_casts_shadows: true, lit_luminance: None }
     }
+}
+
+/// Folder of the night textures, beside `textures`.
+pub const NIGHT_FOLDER: &str = "textures_night";
+
+/// File name of the night texture of `t` (`24560_19344_XO16_LIT.dds`).
+pub fn lit_name(t: &TextureId) -> String {
+    format!("{}_LIT.dds", t.stem())
+}
+
+/// Parse a night texture name (`24560_19344_XO16_LIT.dds`, any case).
+pub fn parse_lit(name: &str) -> Option<TextureId> {
+    let stem = strip_ext(name, "dds")?;
+    let cut = stem.len().checked_sub(4)?;
+    if !stem.is_char_boundary(cut) || !stem[cut..].eq_ignore_ascii_case("_LIT") {
+        return None;
+    }
+    TextureId::parse_stem(&stem[..cut])
 }
 
 /// Generate the contents of a terrain file exactly as Ortho4XP does
@@ -210,6 +231,9 @@ pub fn ter_contents(ter: &TerName, p: &TerParams) -> String {
     s.push_str("A\n800\nTERRAIN\n\n");
     s.push_str(&format!("LOAD_CENTER {lat:.5} {lon:.5} {size} 4096\n"));
     s.push_str(&format!("BASE_TEX_NOWRAP ../textures/{}\n", t.dds_name()));
+    if let (TerKind::Land, false, Some(lum)) = (ter.kind, ter.overlay, p.lit_luminance) {
+        s.push_str(&format!("LIT_TEX_NOWRAP ../{NIGHT_FOLDER}/{}\nLUMINANCE {lum}\n", lit_name(t)));
+    }
     let wet = ter.kind != TerKind::Land;
     if wet && !ter.overlay {
         s.push_str("WATER_COLOR_MASK\n");
@@ -309,6 +333,32 @@ mod tests {
             "A\n800\nTERRAIN\n\nLOAD_CENTER 40.83044 -73.14697 3701 4096\n\
              BASE_TEX_NOWRAP ../textures/49216_38896_XO17.dds\nNO_ALPHA\n"
         );
+    }
+
+    #[test]
+    fn ter_night_lines_on_land_only() {
+        let p = TerParams { lit_luminance: Some(20), ..Default::default() };
+        let ter = TerName::parse("24560_19344_XO16.ter").unwrap();
+        assert_eq!(
+            ter_contents(&ter, &p),
+            "A\n800\nTERRAIN\n\nLOAD_CENTER 41.01307 -73.69629 7382 4096\n\
+             BASE_TEX_NOWRAP ../textures/24560_19344_XO16.dds\n\
+             LIT_TEX_NOWRAP ../textures_night/24560_19344_XO16_LIT.dds\nLUMINANCE 20\nNO_ALPHA\n"
+        );
+        for n in ["24560_19344_XO16_sea_overlay.ter", "24560_19296_XO16_water.ter", "24560_19296_XO16_sea.ter"] {
+            assert!(!ter_contents(&TerName::parse(n).unwrap(), &p).contains("LIT_TEX"), "{n}");
+        }
+    }
+
+    #[test]
+    fn lit_names() {
+        let t = TextureId::new(24560, 19344, 16, "XO");
+        assert_eq!(lit_name(&t), "24560_19344_XO16_LIT.dds");
+        assert_eq!(parse_lit("24560_19344_XO16_LIT.dds"), Some(t.clone()));
+        assert_eq!(parse_lit("24560_19344_XO16_lit.DDS"), Some(t));
+        assert!(parse_lit("24560_19344_XO16.dds").is_none());
+        assert!(parse_lit("_LIT.dds").is_none());
+        assert!(TextureId::parse_dds("24560_19344_XO16_LIT.dds").is_none());
     }
 
     #[test]

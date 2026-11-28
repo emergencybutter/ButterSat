@@ -3,6 +3,7 @@
 pub mod bc1;
 pub mod dds;
 pub mod names;
+pub mod night;
 pub mod raster;
 pub mod tile;
 

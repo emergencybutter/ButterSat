@@ -161,6 +161,7 @@ Synthesized files:
   exact format per S3). Small, cheap, never touches the network.
 - `textures/*.dds` — texture engine (§5), unless an imported pack has a real
   file.
+- `textures_night/*_LIT.dds` — night textures (§5.6), when they are on.
 
 Path handling is normalised in one place: `/` and `\` separators, and
 case-insensitive lookup on Windows and macOS (case-preserving names returned).
@@ -283,6 +284,109 @@ Z-1 tiles (upscaled) instead of ZL Z — ~75% fewer downloads at cruise. Below
 the threshold, real ZL Z. File size and names never change, so X-Plane is
 unaffected; bands built at reduced zoom are tracked like degraded bands and
 upgraded on descent.
+
+### 5.6 Night textures
+X-Plane 12's own terrain glows at night where it is a town. An ortho photo
+replaces that terrain, so without a lit texture of its own a town on the photo
+is black at night except for the lights of X-Plane's road and building
+overlays. Each land terrain file therefore names a night texture, which
+X-Plane adds to the photo after dark and fades in at dusk by itself:
+
+```text
+BASE_TEX_NOWRAP ../textures/24560_19344_XO16.dds
+LIT_TEX_NOWRAP ../textures_night/24560_19344_XO16_LIT.dds
+LUMINANCE 20
+```
+
+Water and sea terrain names none. The `LUMINANCE` value is the user's
+*Town lights at night* setting (`[night] lights`: soft 12, normal 20, strong
+34, or off). So changing the setting rewrites only the `.ter` files and never
+redraws a texture. Like other settings it applies when the stack is rebuilt,
+which is when X-Plane is not running.
+
+**What is drawn** (`xof_core::night`): a 1024² BC1 texture with 11 mips,
+699,192 bytes, for any photo zoom level. It holds:
+- street lamps along X-Plane's own roads, spaced by class (28–45 m), mostly
+  sodium with about a third white, and 12 % out;
+- a soft glow round each lamp;
+- dim windows in a band along town streets (roads with sidewalks);
+- and black everywhere else, since X-Plane lights the photo itself.
+
+How built-up a place is comes from the roads themselves. Road length per km²,
+on a world-aligned grid of zoom-16 tiles smoothed 3×3, sets the share of lamps
+lit (a fifth in open country, all from 10 km/km² on) and the number of
+windows. No extra data is downloaded. Black Marble night-lights data could
+replace this later as an optional catalog layer.
+
+Three rules keep the result consistent:
+- **Seeding:** every random choice is seeded by the position on Earth, so
+  lamps match across texture edges and zoom levels.
+- **Brightness:** lights are splatted with their energy defined in square
+  metres, so a town has the same light per area on ZL16 and ZL18 textures.
+- **Mips:** smaller mips are averaged in linear light.
+
+**BC1 artefacts:** before encoding, light fainter than 6/255 is written black,
+and no texel may be greener or bluer than it is red. After encoding, the
+block endpoints are clamped the same way, and the blocks stay in 4-colour
+mode. Without these steps, 565 quantization turns faint orange glows into
+purple and green blocks.
+
+**Roads** (`xof_mesh::roads`): they come from the network chains of the
+user's Global Scenery DSF:
+- **Source:** the `CMDS` network commands 9, 10 and 11, with points from the
+  `GEOD/PO32` pools scaled by `SC32`.
+- **Classes:** the road subtype set by command 6 is `ROAD_TYPE`/100 in
+  `lib/g10/roads.net`. The tens give the class (primary, secondary, local,
+  single lane, highway, ramp) and the units give the variant (0 is plain,
+  1–8 have sidewalks).
+- **Skipped:** rail, power lines and junction stubs.
+- **Cost:** about 0.5 s per tile to decompress and 50 ms to parse; a city
+  tile holds about 30,000 km of roads.
+- **Extraction:** whenever a Global Scenery DSF is read for the raster splice
+  (§6.2), its roads are extracted too, and on first need otherwise.
+- **Caching:** roads are kept in the mesh cache as `roads/<tile>.<gs
+  fingerprint>.roads` (f32 offsets, regenerable). Freshly extracted roads go
+  through the same quantization, so a texture is identical whichever way its
+  roads came.
+
+**Serving** (`xof_mesh::lit`): a night texture is drawn on its first read
+from the roads of every DSF tile it overlaps (about 50–100 ms). It is then
+kept in two places:
+- **Memory:** the latest 96, about 0.7 MB each.
+- **Disk:** the mesh cache, as `lit/<stem>.<key>.dds`. The key covers the
+  drawing version (`RENDER_VERSION`) and the Global Scenery files the roads
+  came from. Entries are regenerable and evicted with the mesh cache.
+
+Concurrent readers share one drawing. Without roads (open sea, or no Global
+Scenery at that spot) the texture is plain black. Without a Global Scenery
+install, or with the setting off, terrain files name no night texture and
+`textures_night` does not exist.
+
+**Measured in X-Plane 12.4.4** (`bench/nyc-night.toml`, `nyc-noon.toml`,
+`nyc-dusk.toml`, 2026-11-28):
+- **Shown at night:** `LIT_TEX_NOWRAP` and `LUMINANCE` work on ortho terrain.
+  With night textures off, Manhattan on the photo is black at 22:00.
+- **No square lamps:** a lamp drawn into a single texel is magnified into a
+  square at low altitude. So every light is at least 1.2 texels wide, with
+  its energy kept.
+- **Read by day:** X-Plane reads the night texture of practically every
+  photo texture it loads, by day too: 1,651 of 1,657 at noon. Nearly all of
+  these reads happen behind the loading screen.
+- **Paged again:** some are read again while flying as mips page in. With a
+  96-entry memory cache alone, about a quarter were drawn twice. Hence the
+  disk cache.
+- **Black by day was rejected:** serving black textures by day was tried and
+  dropped, for two reasons.
+  - The sun is unknown while the flight loads: the websocket is silent and
+    REST reports 0.0° until the flight runs.
+  - X-Plane does not read night textures again when night falls over loaded
+    scenery.
+
+  So a black-by-day texture would stay black at dusk, and it would save
+  nothing at load.
+- **Bench caveat:** changing the time through `PATCH /api/v3/flight` makes
+  X-Plane reload all scenery. The bench moves the clock through
+  `sim/time/zulu_time_sec` instead (a spot's `local_time_h`).
 
 ---
 
@@ -715,6 +819,12 @@ All milestones M1–M5 are implemented on branch `impl`; spike results are in
 - Local Overpass for the build pipeline; skip all-ocean tiles automatically.
 - Host the catalog (R2 and/or self-hosted) and embed the release key.
 - Build signed installers (`scripts/stage-release.ps1`, `cargo tauri build`).
+- Night textures (§5.6):
+  - Tune brightness and the look with overlays on: the bench disables other
+    packs, so its shots have no road or building lights.
+  - Consider sharper textures (2048²) for low-altitude views.
+  - Find a way to keep the first-time drawing cost off cold loads:
+    pre-drawing with prefetch, or from the catalog.
 
 
 ---

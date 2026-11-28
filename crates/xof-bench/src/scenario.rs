@@ -61,6 +61,10 @@ pub struct Spot {
     /// Slew speed for the leg that ends here (default: `slew_speed_kt`).
     #[serde(default)]
     pub slew_speed_kt: Option<f64>,
+    /// Local time set on arrival here (default: `local_time_h`), e.g. to go
+    /// from day to night over scenery already loaded.
+    #[serde(default)]
+    pub local_time_h: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

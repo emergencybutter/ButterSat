@@ -148,6 +148,11 @@ pub fn pieces(off: u64, len: u64) -> Vec<Piece> {
 
 /// The 128-byte DDS header (`DDS ` magic + DDS_HEADER) for our layout.
 pub fn header() -> [u8; HEADER_LEN as usize] {
+    header_for(DIM, MIP_COUNT)
+}
+
+/// The DDS header of a square BC1 texture of edge `dim` with `mips` levels.
+pub fn header_for(dim: u32, mips: u8) -> [u8; HEADER_LEN as usize] {
     const DDSD_CAPS: u32 = 0x1;
     const DDSD_HEIGHT: u32 = 0x2;
     const DDSD_WIDTH: u32 = 0x4;
@@ -164,11 +169,11 @@ pub fn header() -> [u8; HEADER_LEN as usize] {
     put(0, u32::from_le_bytes(*b"DDS "));
     put(4, 124); // dwSize
     put(8, DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT | DDSD_MIPMAPCOUNT | DDSD_LINEARSIZE);
-    put(12, DIM); // height
-    put(16, DIM); // width
-    put(20, mip_len(0) as u32); // linear size of the top level
+    put(12, dim); // height
+    put(16, dim); // width
+    put(20, (dim.div_ceil(4).max(1) as u64 * dim.div_ceil(4).max(1) as u64 * 8) as u32); // linear size of the top level
     put(24, 0); // depth
-    put(28, MIP_COUNT as u32);
+    put(28, mips as u32);
     // 11 reserved dwords at 32..76
     put(76, 32); // ddspf.dwSize
     put(80, DDPF_FOURCC);

@@ -130,6 +130,7 @@ fn streamer(cache: &Path, gs: Option<PathBuf>, mirrors: Vec<String>, key: &Signi
             global_scenery: gs,
             coverage: Coverage::World,
             pinned: HashSet::new(),
+            night: false,
         },
         vec![key.verifying_key()],
     )

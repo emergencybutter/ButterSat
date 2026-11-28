@@ -76,6 +76,8 @@ impl Daemon {
         std::fs::write(home.join("config.toml"), config)?;
         let log = std::fs::File::create(home.join("daemon.log"))?;
         let child = Command::new(exe)
+            // Night texture drawings (one line each) for read counts.
+            .args(["--log", "info,xof_mesh::lit=debug,xof_mesh::streamer=debug"])
             .env("XOF_HOME", home)
             .env("RUST_LOG", "info")
             .env("XOF_READ_TRACE", home.join("reads.trace"))

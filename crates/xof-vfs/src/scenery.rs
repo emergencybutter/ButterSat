@@ -1,6 +1,6 @@
 //! The platform-independent scenery tree (design §4.2): a merged view of
-//! imported packs, the streamed mesh catalog, synthesized `.ter` files and
-//! synthesized `.dds` textures.
+//! imported packs, the streamed mesh catalog, synthesized `.ter` files,
+//! synthesized `.dds` textures and night textures (§5.6).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -9,8 +9,10 @@ use std::time::SystemTime;
 
 use tokio::runtime::Handle;
 use xof_core::engine::{ReadCtx, ReaderClass, TextureEngine};
-use xof_core::names::{ter_contents, MaskName, TerName, TerParams};
+use xof_core::names::{parse_lit, ter_contents, MaskName, TerName, TerParams, NIGHT_FOLDER};
+use xof_core::night::LIT_FILE_LEN;
 use xof_core::{dds, DsfTile, TextureId};
+use xof_mesh::lit::LitTextures;
 use xof_mesh::MeshStreamer;
 
 /// `water_transition.png`, referenced by inland-water terrain (`BORDER_TEX`):
@@ -100,6 +102,8 @@ pub enum Node {
     Ter(TerName),
     /// A synthesized texture.
     Dds(TextureId),
+    /// A synthesized night texture (`textures_night/<stem>_LIT.dds`).
+    Lit(TextureId),
     /// A streamed water mask.
     Mask(String),
     /// `textures/water_transition.png`.
@@ -130,6 +134,8 @@ pub fn normalize(path: &str) -> String {
 pub struct SceneryConfig {
     /// Imported Ortho4XP/AutoOrtho packs, highest priority first.
     pub packs: Vec<PathBuf>,
+    /// `.ter` generation. `lit_luminance` turns night textures on; it is
+    /// dropped when they cannot be drawn (no mesh or no Global Scenery).
     pub ter: TerParams,
     /// Process names treated as X-Plane (case-insensitive).
     pub xplane_processes: Vec<String>,
@@ -138,14 +144,33 @@ pub struct SceneryConfig {
 pub struct Scenery {
     cfg: SceneryConfig,
     mesh: Option<Arc<MeshStreamer>>,
+    lit: Option<Arc<LitTextures>>,
     engine: TextureEngine,
     rt: Handle,
     mount_time: SystemTime,
 }
 
 impl Scenery {
-    pub fn new(cfg: SceneryConfig, mesh: Option<Arc<MeshStreamer>>, engine: TextureEngine, rt: Handle) -> Arc<Self> {
-        Arc::new(Self { cfg, mesh, engine, rt, mount_time: SystemTime::now() })
+    pub fn new(
+        mut cfg: SceneryConfig,
+        mesh: Option<Arc<MeshStreamer>>,
+        engine: TextureEngine,
+        rt: Handle,
+    ) -> Arc<Self> {
+        let lit = match &mesh {
+            Some(m) if cfg.ter.lit_luminance.is_some() && m.night() => Some(LitTextures::new(m.clone())),
+            _ => None,
+        };
+        if lit.is_none() {
+            // Never name a night texture we cannot serve.
+            cfg.ter.lit_luminance = None;
+        }
+        Arc::new(Self { cfg, mesh, lit, engine, rt, mount_time: SystemTime::now() })
+    }
+
+    /// Night textures, when on.
+    pub fn lit(&self) -> Option<&Arc<LitTextures>> {
+        self.lit.as_ref()
     }
 
     pub fn engine(&self) -> &TextureEngine {
@@ -251,6 +276,14 @@ impl Scenery {
             ["earth nav data"] => Some(Node::Dir("Earth nav data".into())),
             ["terrain"] => Some(Node::Dir("terrain".into())),
             ["textures"] => Some(Node::Dir("textures".into())),
+            ["textures_night"] if self.lit.is_some() => Some(Node::Dir(NIGHT_FOLDER.into())),
+            ["textures_night", _] => {
+                if let Some(p) = self.find_real(&rel) {
+                    return Some(Node::Real(p));
+                }
+                self.lit.as_ref()?;
+                parse_lit(parts[1]).map(Node::Lit)
+            }
             ["earth nav data", folder] => {
                 let found = self.list_dsf_folders().into_iter().find(|f| f.eq_ignore_ascii_case(folder));
                 found.map(|f| Node::Dir(format!("Earth nav data/{f}")))
@@ -325,6 +358,7 @@ impl Scenery {
             Node::Dsf(t) => file(self.mesh.as_ref()?.dsf_size(*t)?),
             Node::Ter(t) => file(ter_contents(t, &self.cfg.ter).len() as u64),
             Node::Dds(_) => file(dds::FILE_LEN),
+            Node::Lit(_) => file(LIT_FILE_LEN),
             Node::Mask(n) => file(self.mesh.as_ref()?.mask(n)?.object.size),
             Node::WaterTransition => file(water_transition_png().len() as u64),
             Node::Readme => file(self.readme_contents().len() as u64),
@@ -340,6 +374,9 @@ impl Scenery {
         if lower.is_empty() {
             for d in ["Earth nav data", "terrain", "textures"] {
                 out.insert(d.into(), Node::Dir(d.into()));
+            }
+            if self.lit.is_some() {
+                out.insert(NIGHT_FOLDER.into(), Node::Dir(NIGHT_FOLDER.into()));
             }
             out.insert("README.txt".into(), Node::Readme);
         } else if lower == "earth nav data" {
@@ -385,6 +422,7 @@ impl Scenery {
             Node::Dir(_) => Err("is a directory".into()),
             Node::Real(p) => read_file_range(p, off, len).map_err(|e| e.to_string()),
             Node::Ter(t) => Ok(slice(ter_contents(t, &self.cfg.ter).as_bytes(), off, len)),
+            Node::Lit(t) => Ok(self.lit.as_ref().ok_or("night textures off")?.read(t, off, len)),
             Node::WaterTransition => Ok(slice(water_transition_png(), off, len)),
             Node::Readme => Ok(slice(self.readme_contents().as_bytes(), off, len)),
             Node::Dsf(t) => {

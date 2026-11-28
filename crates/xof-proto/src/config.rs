@@ -25,6 +25,7 @@ pub struct DaemonConfig {
     pub mount: MountConfig,
     pub imagery: ImageryConfig,
     pub mesh: MeshSection,
+    pub night: NightConfig,
     pub prefetch: PrefetchConfig,
     pub packs: PacksConfig,
     pub simbrief: SimbriefConfig,
@@ -39,6 +40,7 @@ impl Default for DaemonConfig {
             mount: MountConfig::default(),
             imagery: ImageryConfig::default(),
             mesh: MeshSection::default(),
+            night: NightConfig::default(),
             prefetch: PrefetchConfig::default(),
             packs: PacksConfig::default(),
             simbrief: SimbriefConfig::default(),
@@ -149,6 +151,37 @@ impl Default for MeshSection {
             pinned: vec![],
         }
     }
+}
+
+/// Town lights on the photo at night (design §5.6).
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum NightLights {
+    /// No night textures: towns on the photo are dark at night.
+    Off,
+    Soft,
+    #[default]
+    Normal,
+    Strong,
+}
+
+impl NightLights {
+    /// The `LUMINANCE` the terrain files show night textures at.
+    pub fn luminance(self) -> Option<u16> {
+        match self {
+            Self::Off => None,
+            Self::Soft => Some(12),
+            Self::Normal => Some(20),
+            Self::Strong => Some(34),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct NightConfig {
+    /// Night textures drawn from X-Plane's roads (needs Global Scenery).
+    pub lights: NightLights,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -312,6 +345,10 @@ mod tests {
         let partial: DaemonConfig = toml::from_str("[imagery]\nprovider = \"bing\"\n").unwrap();
         assert_eq!(partial.imagery.provider, "bing");
         assert_eq!(partial.imagery.deadline_ms, 1200);
+        let night: DaemonConfig = toml::from_str("[night]\nlights = \"off\"\n").unwrap();
+        assert_eq!(night.night.lights, NightLights::Off);
+        assert_eq!(night.night.lights.luminance(), None);
+        assert_eq!(c.night.lights.luminance(), Some(20));
     }
 
     #[test]

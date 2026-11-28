@@ -12,6 +12,7 @@ use futures::future::{BoxFuture, Shared};
 use futures::FutureExt;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
+use xof_core::night::Roads;
 use xof_core::DsfTile;
 
 use crate::catalog::{CatalogClient, Manifest, MaskEntry, Refresh, TileEntry};
@@ -48,6 +49,9 @@ pub struct MeshConfig {
     pub global_scenery: Option<PathBuf>,
     pub coverage: Coverage,
     pub pinned: HashSet<DsfTile>,
+    /// Extract X-Plane's roads from Global Scenery for night textures
+    /// (design §5.6), whenever a Global Scenery DSF is read.
+    pub night: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -97,6 +101,9 @@ pub struct MeshStreamer {
     online: AtomicBool,
     raster_index: Mutex<HashMap<DsfTile, RasterIndexEntry>>,
     rasters_lru: Mutex<lru_lite::Lru<DsfTile, Arc<Option<Rasters>>>>,
+    roads_lru: Mutex<lru_lite::Lru<DsfTile, Arc<Option<Roads>>>>,
+    /// One road extraction per tile at a time.
+    roads_lock: Mutex<HashMap<DsfTile, Arc<Mutex<()>>>>,
     inflight: Mutex<HashMap<DsfTile, EnsureFuture>>,
     pub stats: MeshStats,
     /// Cached result of `listed_tiles` (invalidated on catalog/online/cache changes).
@@ -143,7 +150,7 @@ fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
 
 impl MeshStreamer {
     pub fn new(cfg: MeshConfig, keys: Vec<ed25519_dalek::VerifyingKey>) -> anyhow::Result<Arc<Self>> {
-        for d in ["catalog", "objects", "spliced"] {
+        for d in ["catalog", "objects", "spliced", "roads", "lit"] {
             std::fs::create_dir_all(cfg.cache_dir.join(d))?;
         }
         let client = CatalogClient::new(keys, &cfg.cache_dir.join("catalog"))?;
@@ -161,6 +168,8 @@ impl MeshStreamer {
             online: AtomicBool::new(false),
             raster_index: Mutex::new(index),
             rasters_lru: Mutex::new(lru_lite::Lru::new(6)),
+            roads_lru: Mutex::new(lru_lite::Lru::new(9)),
+            roads_lock: Mutex::new(HashMap::new()),
             inflight: Mutex::new(HashMap::new()),
             stats: MeshStats::default(),
             listed: RwLock::new(None),
@@ -327,7 +336,17 @@ impl MeshStreamer {
             return r;
         }
         let r = self.gs_path(t).filter(|p| p.exists()).and_then(|p| {
-            match dsf::read_dsf_file(&p).and_then(|d| dsf::extract_rasters(&d)) {
+            let data =
+                dsf::read_dsf_file(&p).inspect_err(|e| tracing::warn!("Global Scenery {}: {e}", p.display())).ok()?;
+            if self.cfg.night {
+                // The file is in memory anyway: keep its roads for later.
+                if let Some(rp) = self.roads_path(t) {
+                    if !rp.exists() {
+                        self.store_roads(t, &rp, &data);
+                    }
+                }
+            }
+            match dsf::extract_rasters(&data) {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::warn!("Global Scenery {}: {e}", p.display());
@@ -337,6 +356,71 @@ impl MeshStreamer {
         });
         let r = Arc::new(r);
         self.rasters_lru.lock().put(t, r.clone());
+        r
+    }
+
+    /// What a tile's roads depend on (its Global Scenery file), for keys of
+    /// things drawn from them.
+    pub fn roads_key(&self, t: DsfTile) -> String {
+        match self.gs_fingerprint(t) {
+            Some((len, mtime)) => format!("{}:{len:x}-{mtime:x}", t.name()),
+            None => format!("{}:nogs", t.name()),
+        }
+    }
+
+    fn roads_path(&self, t: DsfTile) -> Option<PathBuf> {
+        let (len, mtime) = self.gs_fingerprint(t)?;
+        Some(self.cfg.cache_dir.join("roads").join(format!("{}.{len:x}-{mtime:x}.roads", t.name())))
+    }
+
+    /// Extract the roads of Global Scenery DSF bytes and write them to the
+    /// roads cache. Returns them.
+    fn store_roads(&self, t: DsfTile, path: &Path, gs: &[u8]) -> Option<Roads> {
+        let started = std::time::Instant::now();
+        match crate::roads::extract_roads(gs) {
+            Ok(r) => {
+                let bytes = r.to_bytes();
+                if let Err(e) = write_atomic(path, &bytes) {
+                    tracing::warn!("roads cache {}: {e}", path.display());
+                }
+                tracing::debug!("roads of {t}: {} chains in {:?}", r.roads.len(), started.elapsed());
+                // Exactly what a later read of the cache gives (f32 offsets),
+                // so lamps are the same whichever way the roads came.
+                Roads::from_bytes(&bytes)
+            }
+            Err(e) => {
+                tracing::warn!("roads of Global Scenery {t}: {e}");
+                None
+            }
+        }
+    }
+
+    /// X-Plane's roads in tile `t`, from the user's Global Scenery (`None`
+    /// without it). Blocking, local only: memory, then the roads cache, then
+    /// the Global Scenery DSF itself (≈0.5 s, once per tile).
+    pub fn roads(&self, t: DsfTile) -> Arc<Option<Roads>> {
+        if let Some(r) = self.roads_lru.lock().get(&t) {
+            return r;
+        }
+        let gate = self.roads_lock.lock().entry(t).or_default().clone();
+        let _g = gate.lock();
+        if let Some(r) = self.roads_lru.lock().get(&t) {
+            return r;
+        }
+        let r = (|| {
+            let path = self.roads_path(t)?;
+            if let Some(r) = std::fs::read(&path).ok().and_then(|b| Roads::from_bytes(&b)) {
+                touch(&path);
+                return Some(r);
+            }
+            let gs = self.gs_path(t)?;
+            let data =
+                dsf::read_dsf_file(&gs).inspect_err(|e| tracing::warn!("Global Scenery {}: {e}", gs.display())).ok()?;
+            self.store_roads(t, &path, &data)
+        })();
+        let r = Arc::new(r);
+        self.roads_lru.lock().put(t, r.clone());
+        self.roads_lock.lock().remove(&t);
         r
     }
 
@@ -501,6 +585,14 @@ impl MeshStreamer {
     /// Prefetch a tile: DSF (with splice) and its masks.
     pub async fn prefetch(self: &Arc<Self>, t: DsfTile) -> Result<(), String> {
         self.ensure_dsf(t).await?;
+        if self.cfg.night {
+            let this = self.clone();
+            tokio::task::spawn_blocking(move || {
+                this.roads(t);
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        }
         if let Some(e) = self.entry(t) {
             for m in &e.masks {
                 self.ensure_mask(m).await.map_err(|e| e.to_string())?;
@@ -525,7 +617,10 @@ impl MeshStreamer {
             splices: r(&self.stats.splices),
             failures: r(&self.stats.failures),
             in_flight: self.inflight.lock().len(),
-            cache_bytes: dir_size(&self.cfg.cache_dir.join("objects")) + dir_size(&self.cfg.cache_dir.join("spliced")),
+            cache_bytes: ["objects", "spliced", "roads", "lit"]
+                .iter()
+                .map(|d| dir_size(&self.cfg.cache_dir.join(d)))
+                .sum(),
         }
     }
 
@@ -533,7 +628,7 @@ impl MeshStreamer {
     /// touching pinned tiles. Spliced files can always be regenerated locally.
     pub fn evict_to(&self, cap: u64) -> u64 {
         let mut files: Vec<(PathBuf, u64, SystemTime)> = Vec::new();
-        for d in ["objects", "spliced"] {
+        for d in ["objects", "spliced", "roads", "lit"] {
             if let Ok(rd) = std::fs::read_dir(self.cfg.cache_dir.join(d)) {
                 for f in rd.flatten() {
                     if let Ok(md) = f.metadata() {
@@ -571,6 +666,11 @@ impl MeshStreamer {
 
     pub fn global_scenery(&self) -> Option<&Path> {
         self.cfg.global_scenery.as_deref()
+    }
+
+    /// Are night textures drawn (roads extracted)?
+    pub fn night(&self) -> bool {
+        self.cfg.night && self.cfg.global_scenery.is_some()
     }
 
     /// Mark the time of last use (for LRU).

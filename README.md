@@ -20,8 +20,8 @@ Nothing to pre-download: install, launch, fly. Design: [`docs/design.md`](docs/d
 
 | Crate | What |
 |---|---|
-| `xof-core` | tile math, Ortho4XP names, DDS layout, BC1, imagery providers, caches, texture engine |
-| `xof-mesh` | DSF raster splice, signed catalog, mesh streaming |
+| `xof-core` | tile math, Ortho4XP names, DDS layout, BC1, imagery providers, caches, texture engine, night textures |
+| `xof-mesh` | DSF raster splice, Global Scenery roads, signed catalog, mesh streaming |
 | `xof-vfs` | the virtual filesystem: WinFsp (Windows), FUSE (Linux, macOS via macFUSE) |
 | `xof-daemon` | background service: mount, prefetch, X-Plane Web API, IPC |
 | `xof-cli` | command-line control; `xof-cli run` for a standalone test mount |
